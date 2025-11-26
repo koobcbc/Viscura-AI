@@ -5,8 +5,10 @@ import {
 } from 'react-native';
 import { WebView } from 'react-native-webview';
 import * as Location from 'expo-location';
+import * as FileSystem from 'expo-file-system';
 import { Ionicons } from '@expo/vector-icons';
 import taxonomy from '../../../assets/nucc_taxonomy_250.json';
+import cachedDoctors60611Dermatology from '../../../assets/doctors_cache_60611_dermatology.json';
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import Constants from 'expo-constants';
 import DropDownPicker from 'react-native-dropdown-picker';
@@ -16,6 +18,12 @@ import { auth, db } from '../../../firebaseConfig'; // adjust path as needed
 
 const STATE = 'IL';
 
+// Enable fast loading for demo (uses cached data for 60611 zip code and Dermatology)
+const ENABLE_FAST_LOADING = true;
+
+// Enable saving filtered results to file (for sharing actual API results)
+const ENABLE_SAVE_RESULTS = false;
+
 type Doctor = {
   name: string;
   specialty: string;
@@ -23,6 +31,7 @@ type Doctor = {
   mapQuery: string;
   latitude?: number;
   longitude?: number;
+  distance?: number; // Distance in miles from user location
 };
 type TaxonomyEntry = {
   Grouping: string;
@@ -154,14 +163,22 @@ export default function DoctorsScreen({ summary, chatCategory }: { summary: Summ
               const geoResults = await Location.geocodeAsync(zip);
               if (geoResults.length > 0) {
                 const { latitude, longitude } = geoResults[0];
+                // Set location for distance calculations
+                setLocation({
+                  coords: { latitude, longitude, altitude: null, accuracy: null, altitudeAccuracy: null, heading: null, speed: null },
+                  timestamp: Date.now()
+                } as Location.LocationObject);
+                
                 const reverse = await Location.reverseGeocodeAsync({ latitude, longitude });
                 const place = reverse[0];
                 if (place?.city || place?.subregion || place?.region) {
                   setCity(place.city || place.subregion || place.region || '');
-                }
               }
 
+                fetchDoctors(latitude, longitude, zip, selectedSpecialty);
+              } else {
               fetchDoctors(undefined, undefined, zip, selectedSpecialty);
+              }
               return; // skip location request
             }
           }
@@ -231,7 +248,10 @@ export default function DoctorsScreen({ summary, chatCategory }: { summary: Summ
 
   useEffect(() => {
     if (specValue && !loading) {
-      fetchDoctors(undefined, undefined, undefined, specValue);
+      // Pass location coordinates if available
+      const userLat = location?.coords.latitude;
+      const userLon = location?.coords.longitude;
+      fetchDoctors(userLat, userLon, zipCode, specValue);
     }
   }, [specValue]);
 
@@ -287,88 +307,467 @@ export default function DoctorsScreen({ summary, chatCategory }: { summary: Summ
     return address.replace(/(\D|^)(\d{5})(\d{4})(\D|$)/, '$1$2-$3$4');
   };
 
+  // Save filtered results to file and console for sharing
+  const saveFilteredResults = async (doctors: Doctor[], zipCode: string, specialty: string) => {
+    try {
+      const resultsData = {
+        zipCode,
+        specialty,
+        timestamp: new Date().toISOString(),
+        count: doctors.length,
+        doctors: doctors
+      };
+
+      // Log to console in a copyable format
+      console.log('\n📋 ===== FILTERED RESULTS (Copy this JSON) =====');
+      console.log(JSON.stringify(resultsData, null, 2));
+      console.log('📋 ===== END OF RESULTS =====\n');
+
+      // Save to file
+      const fileName = `doctors_cache_${zipCode}_${specialty.toLowerCase().replace(/\s+/g, '_')}.json`;
+      const fileUri = `${FileSystem.documentDirectory}${fileName}`;
+      
+      await FileSystem.writeAsStringAsync(
+        fileUri,
+        JSON.stringify(resultsData.doctors, null, 2),
+        { encoding: FileSystem.EncodingType.UTF8 }
+      );
+
+      console.log(`💾 Results saved to: ${fileUri}`);
+      console.log(`📁 File name: ${fileName}`);
+      
+      // Also show in alert for easy access
+      Alert.alert(
+        'Results Saved',
+        `Filtered results saved!\n\nFile: ${fileName}\nLocation: ${fileUri}\n\nCheck console for JSON to copy.`,
+        [{ text: 'OK' }]
+      );
+    } catch (error) {
+      console.error('Error saving results:', error);
+    }
+  };
+
+  // Calculate distance between two coordinates using Haversine formula (returns miles)
+  const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+    const R = 3959; // Earth's radius in miles
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = 
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+  };
+
   const fetchDoctors = async (lat?: number, lon?: number, zip?: string, specialty?: string) => {
     setLoading(true);
     try {
       let selected = specialty || selectedSpecialty;
-      
-      // Use a more reliable CORS proxy
-      let url = `https://api.allorigins.win/raw?url=${encodeURIComponent(`https://npiregistry.cms.hhs.gov/api/?version=2.1&taxonomy_description=${selected}&limit=20`)}`;
+      let userCity = city;
+      let userLat = lat;
+      let userLon = lon;
 
-      if (zip) {
-        console.log("zip", zip)
-        url = `https://api.allorigins.win/raw?url=${encodeURIComponent(`https://npiregistry.cms.hhs.gov/api/?version=2.1&taxonomy_description=${selected}&limit=20&postal_code=${zip}`)}`;
-      } else if (lat && lon) {
-        const geo = await Location.reverseGeocodeAsync({ latitude: lat, longitude: lon });
-        if (geo[0]?.postalCode) {
-          console.log("zip from geo", geo[0].postalCode)
-          url = `https://api.allorigins.win/raw?url=${encodeURIComponent(`https://npiregistry.cms.hhs.gov/api/?version=2.1&taxonomy_description=${selected}&limit=20&postal_code=${geo[0].postalCode}`)}`;
-        } else {
-          throw new Error("Failed to determine postal code.");
+      // Fast loading: Use cached data for demo (regardless of selected specialty)
+      if (ENABLE_FAST_LOADING && zip === '60611') {
+        console.log('🚀 Using cached data for fast loading (60611, any specialty)');
+        
+        // Set city for 60611
+        if (!userCity) {
+          setCity('Chicago');
+          userCity = 'Chicago';
         }
-      } else {
-        url = `https://api.allorigins.win/raw?url=${encodeURIComponent(`https://npiregistry.cms.hhs.gov/api/?version=2.1&taxonomy_description=${selected}&limit=20&state=${STATE}`)}`;
-      }
-
-      const res = await fetch(url);
-      const json = await res.json();
-
-      if (!json.results) throw new Error('No results found');
-
-      const parsed: Doctor[] = await Promise.all(
-        json.results.map(async (doc: any) => {
-          const basic = doc.basic || {};
-          
-          // Find the address with address_purpose as "LOCATION"
-          const addresses = doc.addresses || [];
-          const locationAddress = addresses.find((addr: any) => addr.address_purpose === 'LOCATION') || addresses[0] || {};
-          
-          const name = `${basic.first_name || ''} ${basic.last_name || ''}`.trim();
-          const specialty = doc.taxonomies?.[0]?.desc || 'N/A';
-          const fullAddress = `${locationAddress.address_1 || ''} ${locationAddress.city || ''}, ${locationAddress.state || ''} ${formatZipCode(locationAddress.postal_code) || ''}`;
-          const mapQuery = `${locationAddress.address_1 || ''}, ${locationAddress.city || ''}, ${locationAddress.state || ''}`;
-
-          // Geocode address to get coordinates
-          let latitude: number | undefined;
-          let longitude: number | undefined;
-          try {
-            if (locationAddress.address_1 && locationAddress.city && locationAddress.state) {
-              const geoResults = await Location.geocodeAsync(mapQuery);
-              if (geoResults.length > 0) {
-                latitude = geoResults[0].latitude;
-                longitude = geoResults[0].longitude;
-              }
+        
+        // Get user location for distance calculation
+        if (!userLat || !userLon) {
+          if (zip === '60611') {
+            // Approximate coordinates for 60611 (Chicago)
+            const geoResults = await Location.geocodeAsync('60611');
+            if (geoResults.length > 0) {
+              userLat = geoResults[0].latitude;
+              userLon = geoResults[0].longitude;
+              setLocation({
+                coords: { latitude: userLat, longitude: userLon, altitude: null, accuracy: null, altitudeAccuracy: null, heading: null, speed: null },
+                timestamp: Date.now()
+              } as Location.LocationObject);
             }
-          } catch (err) {
-            console.error('Geocoding error for', mapQuery, err);
           }
+        }
 
-          return {
-            name: name || doc.basic.organization_name || 'Unknown',
-            specialty,
-            address: fullAddress,
-            mapQuery,
-            latitude,
-            longitude
-          };
-        })
-      );
-      
-      setDoctors(parsed);
-      
-      // Update map region to show doctors
-      if (parsed.length > 0) {
-        const doctorsWithCoords = parsed.filter(d => d.latitude && d.longitude);
-        if (doctorsWithCoords.length > 0) {
-          const avgLat = doctorsWithCoords.reduce((sum, d) => sum + (d.latitude || 0), 0) / doctorsWithCoords.length;
-          const avgLon = doctorsWithCoords.reduce((sum, d) => sum + (d.longitude || 0), 0) / doctorsWithCoords.length;
+        // Use cached data and recalculate distances if user location is available
+        const cachedDoctors = (cachedDoctors60611Dermatology as Doctor[]).map(doctor => {
+          let distance = doctor.distance;
+          if (userLat && userLon && doctor.latitude && doctor.longitude) {
+            distance = calculateDistance(userLat, userLon, doctor.latitude, doctor.longitude);
+          }
+          return { ...doctor, distance };
+        });
+
+        // Sort by distance and limit to top 20
+        const sortedDoctors = cachedDoctors
+          .sort((a, b) => {
+            const distA = a.distance ?? Infinity;
+            const distB = b.distance ?? Infinity;
+            return distA - distB;
+          })
+          .slice(0, 20);
+
+        setDoctors(sortedDoctors);
+        
+        // Save cached results (optional - for comparison)
+        if (ENABLE_SAVE_RESULTS && sortedDoctors.length > 0) {
+          saveFilteredResults(sortedDoctors, zip || '60611', selected);
+        }
+        
+        // Update map region
+        if (sortedDoctors.length > 0) {
+          const avgLat = sortedDoctors.reduce((sum, d) => sum + (d.latitude || 0), 0) / sortedDoctors.length;
+          const avgLon = sortedDoctors.reduce((sum, d) => sum + (d.longitude || 0), 0) / sortedDoctors.length;
           setMapRegion({
-            latitude: avgLat,
-            longitude: avgLon,
-            latitudeDelta: 0.1,
-            longitudeDelta: 0.1,
+            latitude: userLat || avgLat,
+            longitude: userLon || avgLon,
+            latitudeDelta: 0.05,
+            longitudeDelta: 0.05,
           });
         }
+        
+        setLoading(false);
+        return;
+      }
+
+      // If we have location but no city, get city from reverse geocoding
+      if ((lat && lon) && !userCity) {
+        const geo = await Location.reverseGeocodeAsync({ latitude: lat, longitude: lon });
+        if (geo[0]?.city) {
+          userCity = geo[0].city;
+          setCity(userCity);
+        }
+      }
+
+      // If we have zip but need city, get it from reverse geocoding
+      if (zip && !userCity) {
+        const geoResults = await Location.geocodeAsync(zip);
+        if (geoResults.length > 0) {
+          const reverse = await Location.reverseGeocodeAsync({ 
+            latitude: geoResults[0].latitude, 
+            longitude: geoResults[0].longitude 
+          });
+          if (reverse[0]?.city) {
+            userCity = reverse[0].city;
+            setCity(userCity);
+            userLat = geoResults[0].latitude;
+            userLon = geoResults[0].longitude;
+          }
+        }
+      }
+
+      // Build base URL - NPI Registry API may not support city parameter directly
+      // So we'll search by state and filter by city in results
+      // Reduced limit to avoid 500 errors
+      const buildUrl = (taxonomy: string, proxyIndex = 0) => {
+        const baseUrl = `https://npiregistry.cms.hhs.gov/api/?version=2.1&taxonomy_description=${encodeURIComponent(taxonomy)}&limit=50&state=${STATE}`;
+        
+        // Try different CORS proxies if one fails
+        const proxies = [
+          `https://api.allorigins.win/raw?url=${encodeURIComponent(baseUrl)}`,
+          `https://corsproxy.io/?${encodeURIComponent(baseUrl)}`,
+          `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(baseUrl)}`,
+          baseUrl // Direct call as last resort
+        ];
+        
+        return proxies[proxyIndex] || proxies[0];
+      };
+
+      // Helper function to fetch with retry logic and timeout
+      const fetchWithRetry = async (taxonomy: string, taxonomyName: string, retries = 3) => {
+        for (let attempt = 0; attempt < retries; attempt++) {
+          // Try different proxy on each retry
+          const url = buildUrl(taxonomy, attempt);
+          
+          try {
+            // Add delay between retries
+            if (attempt > 0) {
+              await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+            }
+
+            // Create a timeout promise (15 seconds)
+            const timeoutPromise = new Promise((_, reject) => {
+              setTimeout(() => reject(new Error('Request timeout')), 15000);
+            });
+
+            // Race between fetch and timeout
+            const response = await Promise.race([
+              fetch(url, {
+                method: 'GET',
+                headers: {
+                  'Accept': 'application/json',
+                },
+              }),
+              timeoutPromise
+            ]) as Response;
+            
+            // Check if response is ok
+            if (!response.ok) {
+              const errorText = await response.text().catch(() => '');
+              console.warn(`API error for ${taxonomyName} (attempt ${attempt + 1}): ${response.status} ${response.statusText}`, errorText.substring(0, 100));
+              
+              // If 500 or 408 error and not last attempt, retry with different proxy
+              if ((response.status === 500 || response.status === 408) && attempt < retries - 1) {
+                console.log(`Retrying ${taxonomyName} with different proxy...`);
+                continue;
+              }
+              return { results: [] };
+            }
+
+            // Check content type
+            const contentType = response.headers.get('content-type');
+            if (!contentType || !contentType.includes('application/json')) {
+              const text = await response.text();
+              console.warn(`Non-JSON response for ${taxonomyName} (attempt ${attempt + 1}):`, text.substring(0, 200));
+              
+              if (attempt < retries - 1) {
+                continue;
+              }
+              return { results: [] };
+            }
+
+            const json = await response.json();
+            console.log(`✅ Successfully fetched ${taxonomyName} (attempt ${attempt + 1})`);
+            return json;
+          } catch (error: any) {
+            const isTimeout = error.message === 'Request timeout';
+            console.error(`Error fetching ${taxonomyName} (attempt ${attempt + 1}):`, isTimeout ? 'Request timeout' : error.message);
+            
+            // If timeout or network error and not last attempt, retry
+            if (attempt < retries - 1) {
+              console.log(`Retrying ${taxonomyName} (${isTimeout ? 'timeout' : 'network error'})...`);
+              continue;
+            }
+            return { results: [] };
+          }
+        }
+        return { results: [] };
+      };
+
+      // Search for selected specialty only (Dermatology)
+      // If you want to also search for "General Practice", set INCLUDE_GENERAL_PRACTICE to true
+      const INCLUDE_GENERAL_PRACTICE = false;
+      
+      let allResults: any[] = [];
+      const seenNpis = new Set<string>();
+
+      // Helper to get specialty from doctor record
+      const getSpecialty = (doc: any): string => {
+        const taxonomies = doc.taxonomies || [];
+        if (taxonomies.length > 0 && taxonomies[0].desc) {
+          return taxonomies[0].desc.toLowerCase();
+        }
+        return '';
+      };
+
+      const addUniqueResults = (results: any[], isGeneralPracticeSearch: boolean = false) => {
+        if (results && Array.isArray(results)) {
+          results.forEach((doc: any) => {
+            const npi = doc.number;
+            if (npi && !seenNpis.has(npi)) {
+              // If this is from "General Practice" search, filter by specialty
+              if (isGeneralPracticeSearch) {
+                const specialty = getSpecialty(doc);
+                // Only include if specialty is "General Practice", "General Specialty", or "Dermatology"
+                const allowedSpecialties = ['general practice', 'general specialty', 'dermatology'];
+                if (!allowedSpecialties.includes(specialty)) {
+                  return; // Skip this doctor
+                }
+              }
+              seenNpis.add(npi);
+              allResults.push(doc);
+            }
+          });
+        }
+      };
+
+      // Search for selected specialty (Dermatology)
+      const json1 = await fetchWithRetry(selected, selected);
+      addUniqueResults(json1.results, false);
+
+      // Optionally search for General Practice as well
+      if (INCLUDE_GENERAL_PRACTICE && selected.toLowerCase() !== 'general practice') {
+        await new Promise(resolve => setTimeout(resolve, 1000)); // 1 second delay between calls
+        const json2 = await fetchWithRetry('General Practice', 'General Practice');
+        addUniqueResults(json2.results, true);  // General Practice search - filter by specialty
+      }
+
+      // Filter by city if we have a city name (case-insensitive)
+      let filteredResults = allResults;
+      if (userCity) {
+        filteredResults = allResults.filter((doc: any) => {
+          const addresses = doc.addresses || [];
+          const locationAddress = addresses.find((addr: any) => addr.address_purpose === 'LOCATION') || addresses[0] || {};
+          const docCity = locationAddress.city || '';
+          return docCity.toLowerCase() === userCity.toLowerCase();
+        });
+      }
+
+      if (filteredResults.length === 0) {
+        // If no results for the city, try without city filter
+        if (userCity && allResults.length > 0) {
+          console.warn(`No results found for city "${userCity}", showing results from ${STATE}`);
+          filteredResults = allResults;
+      } else {
+          throw new Error('No results found');
+        }
+      }
+
+      // Helper function to find the best matching taxonomy
+      // Priority: 1) Dermatology-related, 2) General Practice, 3) null (filter out)
+      const findBestTaxonomy = (taxonomies: any[]): string | null => {
+        if (!taxonomies || taxonomies.length === 0) {
+          return null;
+        }
+
+        const dermatologyKeywords = ['dermatology', 'dermatologist', 'dermatologic', 'skin'];
+        const generalPracticeKeywords = ['general practice', 'general specialty', 'family practice', 'primary care'];
+
+        // First, look for Dermatology-related specialties
+        for (const taxonomy of taxonomies) {
+          const desc = (taxonomy.desc || '').toLowerCase();
+          if (dermatologyKeywords.some(keyword => desc.includes(keyword))) {
+            return taxonomy.desc; // Return original case
+          }
+        }
+
+        // Second, look for General Practice
+        for (const taxonomy of taxonomies) {
+          const desc = (taxonomy.desc || '').toLowerCase();
+          if (generalPracticeKeywords.some(keyword => desc.includes(keyword))) {
+            return taxonomy.desc; // Return original case
+          }
+        }
+
+        // If neither found, filter out this doctor
+        return null;
+      };
+
+      // Filter doctors by taxonomy before processing
+      const doctorsWithValidTaxonomy = filteredResults.filter((doc: any) => {
+        const taxonomies = doc.taxonomies || [];
+        return findBestTaxonomy(taxonomies) !== null;
+      });
+
+      if (doctorsWithValidTaxonomy.length === 0) {
+        throw new Error('No doctors found with matching specialties');
+      }
+
+      // Helper function to geocode with retry and rate limiting
+      const geocodeWithRetry = async (mapQuery: string, retries = 2): Promise<{ latitude?: number; longitude?: number }> => {
+        for (let i = 0; i <= retries; i++) {
+          try {
+            // Add small delay to avoid rate limiting (50ms between requests)
+            if (i > 0) {
+              await new Promise(resolve => setTimeout(resolve, 100 * i));
+            }
+            const geoResults = await Location.geocodeAsync(mapQuery);
+            if (geoResults && geoResults.length > 0) {
+              return {
+                latitude: geoResults[0].latitude,
+                longitude: geoResults[0].longitude
+              };
+            }
+          } catch (err: any) {
+            // If it's the last retry, log the error
+            if (i === retries) {
+              console.warn(`Geocoding failed for "${mapQuery}" after ${retries + 1} attempts:`, err.message);
+            }
+            // Continue to next retry or return undefined
+          }
+        }
+        return {};
+      };
+
+      // Parse all doctors and get coordinates with batching to avoid rate limits
+      const batchSize = 10; // Process 10 doctors at a time
+      const parsed: Doctor[] = [];
+      
+      for (let i = 0; i < doctorsWithValidTaxonomy.length; i += batchSize) {
+        const batch = doctorsWithValidTaxonomy.slice(i, i + batchSize);
+        const batchResults = await Promise.all(
+          batch.map(async (doc: any) => {
+        const basic = doc.basic || {};
+            
+            // Find the address with address_purpose as "LOCATION"
+            const addresses = doc.addresses || [];
+            const locationAddress = addresses.find((addr: any) => addr.address_purpose === 'LOCATION') || addresses[0] || {};
+            
+        const name = `${basic.first_name || ''} ${basic.last_name || ''}`.trim();
+            // Use the best matching taxonomy (already filtered, so this will always return a value)
+            const specialty = findBestTaxonomy(doc.taxonomies || []) || 'N/A';
+            const fullAddress = `${locationAddress.address_1 || ''} ${locationAddress.city || ''}, ${locationAddress.state || ''} ${formatZipCode(locationAddress.postal_code) || ''}`;
+            const mapQuery = `${locationAddress.address_1 || ''}, ${locationAddress.city || ''}, ${locationAddress.state || ''}`;
+
+            // Geocode address to get coordinates (with retry logic)
+            let latitude: number | undefined;
+            let longitude: number | undefined;
+            
+            if (locationAddress.address_1 && locationAddress.city && locationAddress.state) {
+              const coords = await geocodeWithRetry(mapQuery);
+              latitude = coords.latitude;
+              longitude = coords.longitude;
+            }
+
+            // Calculate distance from user location if available
+            let distance: number | undefined;
+            if (userLat && userLon && latitude && longitude) {
+              distance = calculateDistance(userLat, userLon, latitude, longitude);
+            }
+
+        return {
+          name: name || doc.basic.organization_name || 'Unknown',
+          specialty,
+          address: fullAddress,
+              mapQuery,
+              latitude,
+              longitude,
+              distance
+            };
+          })
+        );
+        parsed.push(...batchResults);
+        
+        // Add delay between batches to avoid rate limiting
+        if (i + batchSize < filteredResults.length) {
+          await new Promise(resolve => setTimeout(resolve, 200));
+        }
+      }
+
+      // Filter doctors with coordinates and sort by distance
+      const doctorsWithCoords = parsed.filter(d => d.latitude && d.longitude);
+      
+      // Sort by distance (closest first), then limit to top 20
+      const sortedDoctors = doctorsWithCoords
+        .sort((a, b) => {
+          const distA = a.distance ?? Infinity;
+          const distB = b.distance ?? Infinity;
+          return distA - distB;
+        })
+        .slice(0, 20);
+      
+      setDoctors(sortedDoctors);
+      
+      // Save filtered results to file and console (for sharing actual API results)
+      if (ENABLE_SAVE_RESULTS && sortedDoctors.length > 0) {
+        saveFilteredResults(sortedDoctors, zip || 'unknown', selected);
+      }
+      
+      // Update map region to show doctors
+      if (sortedDoctors.length > 0) {
+        const avgLat = sortedDoctors.reduce((sum, d) => sum + (d.latitude || 0), 0) / sortedDoctors.length;
+        const avgLon = sortedDoctors.reduce((sum, d) => sum + (d.longitude || 0), 0) / sortedDoctors.length;
+        setMapRegion({
+          latitude: avgLat,
+          longitude: avgLon,
+          latitudeDelta: 0.1,
+          longitudeDelta: 0.1,
+        });
       }
       
       // If we have user location, center map on user
@@ -597,7 +996,6 @@ export default function DoctorsScreen({ summary, chatCategory }: { summary: Summ
                     const trimmed = zipInput.trim();
                     if (trimmed.length === 5) {
                       setZipCode(trimmed);
-                      fetchDoctors(undefined, undefined, trimmed, selectedSpecialty);
                       setEditingZip(false);
 
                       try {
@@ -610,6 +1008,39 @@ export default function DoctorsScreen({ summary, chatCategory }: { summary: Summ
                       } catch (err) {
                         console.error("Failed to update Firestore:", err);
                         Alert.alert("Firestore Error", "Failed to save ZIP code.");
+                      }
+
+                      // Get coordinates from zip code for distance calculation and update city
+                      try {
+                        const geoResults = await Location.geocodeAsync(trimmed);
+                        if (geoResults.length > 0) {
+                          const { latitude, longitude } = geoResults[0];
+                          setLocation({
+                            coords: { latitude, longitude, altitude: null, accuracy: null, altitudeAccuracy: null, heading: null, speed: null },
+                            timestamp: Date.now()
+                          } as Location.LocationObject);
+                          
+                          // Get city name from reverse geocoding
+                          try {
+                            const reverse = await Location.reverseGeocodeAsync({ latitude, longitude });
+                            if (reverse[0]) {
+                              const { city, subregion, region } = reverse[0];
+                              setCity(city || subregion || region || '');
+                            }
+                          } catch (reverseErr) {
+                            console.warn('Failed to get city from zip code:', reverseErr);
+                          }
+                          
+                          fetchDoctors(latitude, longitude, trimmed, selectedSpecialty);
+                        } else {
+                          // If geocoding fails, still try to fetch doctors but clear city
+                          setCity('');
+                          fetchDoctors(undefined, undefined, trimmed, selectedSpecialty);
+                        }
+                      } catch (err) {
+                        // If geocoding fails, still try to fetch doctors but clear city
+                        setCity('');
+                        fetchDoctors(undefined, undefined, trimmed, selectedSpecialty);
                       }
 
                     } else {
@@ -679,7 +1110,10 @@ export default function DoctorsScreen({ summary, chatCategory }: { summary: Summ
               onPress={() => {
                 if (specValue) {
                   setSelectedSpecialty(specValue);
-                  fetchDoctors(undefined, undefined, zipCode, specValue);
+                  // Pass location coordinates if available
+                  const userLat = location?.coords.latitude;
+                  const userLon = location?.coords.longitude;
+                  fetchDoctors(userLat, userLon, zipCode, specValue);
                   setModalVisible(false);
                 } else {
                   Alert.alert("Select Specialization", "Please choose a valid specialization.");
@@ -747,6 +1181,9 @@ export default function DoctorsScreen({ summary, chatCategory }: { summary: Summ
                   <Text style={styles.name}>{item.name}</Text>
                   <Text style={styles.specialty}>{item.specialty}</Text>
                   <Text style={styles.address}>{item.address}</Text>
+                  {item.distance !== undefined && (
+                    <Text style={styles.distance}>{item.distance.toFixed(1)} miles away</Text>
+                  )}
                 </View>
                 <Ionicons name="location-outline" size={20} color="#A5CCC9" />
               </View>
@@ -776,6 +1213,7 @@ const styles = StyleSheet.create({
   name: { fontSize: 16, fontWeight: 'bold', color: '#2c3e50' },
   specialty: { fontSize: 14, color: '#2c3e50', marginTop: 4 },
   address: { fontSize: 13, color: '#555', marginTop: 4 },
+  distance: { fontSize: 12, color: '#A5CCC9', marginTop: 4, fontWeight: '500' },
   errorContainer: {
     flex: 1, alignItems: 'center', justifyContent: 'center'
   },

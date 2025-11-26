@@ -241,7 +241,6 @@ export default function Dashboard() {
             />
           )}
           
-          {/* Background Image */}
           <Image
             source={category === 'skin' ? skinImage : dentalImage}
             style={styles.backgroundImage}
@@ -271,8 +270,6 @@ const styles = StyleSheet.create({
   menu: { backgroundColor: '#ffffff', borderRadius: 8, paddingVertical: 8, paddingHorizontal: 10, position: 'absolute', top: 48, right: 0, width: 180, zIndex: 9999, elevation: 16, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 8, shadowOffset: { width: 0, height: 6 }, borderWidth: 1, borderColor: '#e2e6ea' },
   menuItem: { paddingVertical: 8, fontSize: 18, color: '#333' },
   incompleteMenuItem: { color: '#e74c3c', fontWeight: 'bold' },
-  
-  // New Chat Card
   newChatCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -292,8 +289,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#4a90e2',
   },
-  
-  // Chat styles
   chatCard: { backgroundColor: '#e8f4fd', padding: 16, borderRadius: 10, justifyContent: 'space-between', flexDirection: 'column', minHeight: 96 },
   chatTitle: { fontSize: 18, fontWeight: '600', color: '#2c3e50', marginBottom: 6 },
   timestamp: { fontSize: 14, color: '#7f8c8d' },
@@ -301,8 +296,6 @@ const styles = StyleSheet.create({
   rowBack: { alignItems: 'center', backgroundColor: '#ff3b30', flex: 1, flexDirection: 'row', justifyContent: 'flex-end', paddingRight: 20, borderRadius: 10, marginBottom: 12 },
   deleteButton: { alignItems: 'center', justifyContent: 'center', width: 75, height: '100%' },
   deleteText: { color: '#fff', fontWeight: 'bold' },
-
-  // Empty state
   emptyStateContainer: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   emptyIconContainer: { width: 96, height: 96, borderRadius: 48, backgroundColor: 'rgba(74, 144, 226, 0.1)', alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
   emptyIcon: { opacity: 0.6 },
@@ -310,8 +303,6 @@ const styles = StyleSheet.create({
   emptySubtitle: { fontSize: 14, color: '#7f8c8d', marginBottom: 16, textAlign: 'center', paddingHorizontal: 20 },
   emptyCtaButton: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#4a90e2', paddingVertical: 12, paddingHorizontal: 16, borderRadius: 10 },
   emptyCtaText: { color: '#fff', fontWeight: '600', marginLeft: 8 },
-
-  // List panel wrapper
   listPanel: { 
     flex: 1, 
     backgroundColor: '#ffffff', 

@@ -85,7 +85,6 @@ export default function RootLayout() {
               <Stack.Screen name="signup" />
               <Stack.Screen name="profile-creation" />
               <Stack.Screen name="category-selection" options={{ animation: 'none', gestureEnabled: false }} />
-              <Stack.Screen name="user-dashboard" options={{ animation: 'none', gestureEnabled: false }} />
               <Stack.Screen name="dashboard" />
               <Stack.Screen name="chat/[chatId]" options={{ animation: 'slide_from_right' }} />
             </Stack>

@@ -9,7 +9,7 @@ import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
 import { getAuth, signOut } from 'firebase/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import BottomNavigation from '../components/BottomNavigation';
+// import BottomNavigation from '../components/BottomNavigation';
 
 const logo = require('../assets/images/transparent-logo.png');
 const skinImage = require('../assets/images/skin1.png');
@@ -164,7 +164,7 @@ export default function CategorySelectionScreen() {
           </View>
         </View>
 
-        <BottomNavigation activeTab="chat" />
+        {/* <BottomNavigation activeTab="chat" /> */}
       </View>
     </TouchableWithoutFeedback>
   );
@@ -227,7 +227,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     position: 'absolute',
     top: 48,
-    left: 0,
+    right: 0,
     width: 180,
     zIndex: 9999,
     elevation: 16,

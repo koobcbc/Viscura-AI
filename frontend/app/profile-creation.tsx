@@ -134,7 +134,7 @@ export default function ProfileCreationScreen() {
           profileSkippedAt: new Date()
         }, { merge: true });
       }
-      router.replace('/user-dashboard');
+      router.replace('/category-selection');
     } catch (error) {
       Alert.alert('Error', 'Failed to save profile status');
     } finally {
@@ -158,7 +158,7 @@ export default function ProfileCreationScreen() {
           }
         }, { merge: true });
       }
-      router.replace('/user-dashboard');
+      router.replace('/category-selection');
     } catch (error) {
       Alert.alert('Error', 'Failed to save profile');
     } finally {

@@ -9,7 +9,7 @@ import { doc, getDoc, collection, query, where, getDocs, orderBy, limit } from '
 import { db } from '../firebaseConfig';
 import { getAuth, signOut } from 'firebase/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import BottomNavigation from '../components/BottomNavigation';
+// import BottomNavigation from '../components/BottomNavigation';
 
 const logo = require('../assets/images/transparent-logo.png');
 const humanImage = require('../assets/images/man-transparent_skinny.png');
@@ -191,13 +191,15 @@ export default function UserDashboardScreen() {
                   
                   return (
                     <View key={card.category} style={styles.cardWithLine}>
-                      {/* Connecting Line */}
-                      <View style={[
-                        styles.connectingLine,
-                        isTopCard ? styles.lineTop : styles.lineMiddle
-                      ]}>
-                        <View style={styles.lineGradient} />
-                      </View>
+                      {/* Connecting Line - Only show for Dental, hide for Skin */}
+                      {card.category === 'Dental' && (
+                        <View style={[
+                          styles.connectingLine,
+                          isTopCard ? styles.lineTop : styles.lineMiddle
+                        ]}>
+                          <View style={styles.lineGradient} />
+                        </View>
+                      )}
                       
                       {/* Diagnosis Card */}
                       <TouchableOpacity
@@ -297,7 +299,7 @@ export default function UserDashboardScreen() {
           </ScrollView>
         </View>
 
-        <BottomNavigation activeTab="dashboard" />
+        {/* <BottomNavigation activeTab="dashboard" /> */}
       </View>
     </TouchableWithoutFeedback>
   );
@@ -496,7 +498,7 @@ const styles = StyleSheet.create({
   lineGradient: {
     width: '100%',
     height: '100%',
-    backgroundColor: '#FFD700',
+    backgroundColor: '#A5CCC9',
     opacity: 0.6,
     borderTopRightRadius: 2,
     borderBottomRightRadius: 2,

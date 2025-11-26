@@ -4,7 +4,7 @@ import {
   KeyboardAvoidingView, Platform, Image, TouchableOpacity, Animated, Dimensions, ActionSheetIOS, Alert, TouchableWithoutFeedback, Keyboard, ScrollView, Modal
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import { collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, updateDoc, deleteDoc, doc, Timestamp } from 'firebase/firestore';
+import { collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, updateDoc, deleteDoc, doc, Timestamp, getDoc } from 'firebase/firestore';
 import { db, auth, storage } from '../../../firebaseConfig';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { Ionicons, MaterialIcons, Feather } from '@expo/vector-icons';
@@ -12,9 +12,13 @@ import { useRouter } from 'expo-router';
 import SummaryScreen from './SummaryScreen';
 import DoctorsScreen from './DoctorsScreen';
 import Markdown from 'react-native-markdown-display';
+import cachedSummaryBenignKeratosis from '../../../assets/summary_cache_benign_keratosis.json';
 const logo = require('../../../assets/images/transparent-logo-v.png');
 const headerLogo = require('../../../assets/images/transparent-logo.png');
 const doctorIcon = require('../../../assets/images/doctor.png');
+
+// Enable fast loading for demo (uses cached summary for Benign Keratosis)
+const ENABLE_FAST_SUMMARY_LOADING = false;
 
 const { height: screenHeight } = Dimensions.get('window');
 
@@ -62,6 +66,7 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
     specialty: ""
   });
   const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [isTitleManuallyChanged, setIsTitleManuallyChanged] = useState(false);
 
   useEffect(() => {
     const keyboardDidShowListener = Keyboard.addListener('keyboardDidShow', () => {
@@ -78,12 +83,75 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
     if (!chatId) return;
     const q = query(collection(db, `chats/${chatId}/messages`), orderBy('createdAt', 'asc'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const msgs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Message));
-      setMessages(msgs);
+      const msgs = snapshot.docs.map(doc => {
+        const data = doc.data();
+        // Map backend role to frontend sender
+        const sender = data.role === 'patient' ? 'user' : (data.role === 'assistant' ? 'bot' : data.sender || 'user');
+        // Map backend content to frontend text
+        const text = data.content || data.text || '';
+        // Get image from metadata if available
+        const image = data.metadata?.image_url || data.image || undefined;
+        // Filter out "[Image Sent]" placeholder text - replace with empty string
+        let messageText = text;
+        if (messageText && (messageText.includes('[Image Sent]') || messageText.includes('[Image sent]') || messageText.includes('Image Sent'))) {
+          messageText = '';
+        }
+        
+        return {
+          id: doc.id,
+          text: messageText,
+          user: data.user || auth.currentUser?.displayName || 'You',
+          userId: data.userId || auth.currentUser?.uid || '',
+          createdAt: data.timestamp || data.createdAt,
+          sender,
+          image,
+        } as Message;
+      });
+      // Remove any temporary optimistic messages when real messages arrive from Firestore
+      setMessages(prev => {
+        // Keep optimistic messages that don't have a real counterpart yet
+        const realMessageKeys = new Set(
+          msgs.map(m => {
+            // For image messages, match by image URL; for text messages, match by text
+            if (m.image) return `image:${m.image}`;
+            return `text:${m.text}`;
+          })
+        );
+        const filteredPrev = prev.filter(msg => {
+          // Keep real messages or optimistic messages that haven't been saved yet
+          if (!msg.id.startsWith('temp-')) return true;
+          // Remove optimistic message if a real one with same key exists
+          const msgKey = msg.image ? `image:${msg.image}` : `text:${msg.text}`;
+          return !realMessageKeys.has(msgKey);
+        });
+        // Merge: combine filtered optimistic messages with real messages
+        const combined = [...filteredPrev.filter(m => m.id.startsWith('temp-')), ...msgs];
+        // Sort by createdAt if available, otherwise keep order
+        return combined.sort((a, b) => {
+          const aTime = a.createdAt?.toMillis() || 0;
+          const bTime = b.createdAt?.toMillis() || 0;
+          return aTime - bTime;
+        });
+      });
       console.log("setting messages", msgs)
+      
+      // Scroll to bottom when messages are first loaded or updated
+      setTimeout(() => {
+        flatListRef.current?.scrollToEnd({ animated: false });
+      }, 100);
     });
     return () => unsubscribe();
   }, [chatId]);
+
+  // Scroll to bottom when component mounts or messages change
+  useEffect(() => {
+    if (messages.length > 0) {
+      // Small delay to ensure FlatList is rendered
+      setTimeout(() => {
+        flatListRef.current?.scrollToEnd({ animated: true });
+      }, 300);
+    }
+  }, [messages.length]);
 
   useEffect(() => {
     if (!chatId) return;
@@ -94,6 +162,48 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
         const data = docSnap.data();
         setChatTitle(data.title || 'Chat');
         setChatCategory(data.category || null);
+        setIsTitleManuallyChanged(data.isTitleManuallyChanged || false);
+        
+        // Load summary from Firestore if it exists
+        if (data.summary && 
+            data.summary.diagnosis && 
+            data.summary.diagnosis !== "Not enough information" &&
+            data.summary.diagnosis.trim() !== "") {
+          console.log('📥 Loading summary from Firestore:', data.summary);
+          
+          const loadedSummary: Summary = {
+            diagnosis: data.summary.diagnosis || "Not enough information",
+            symptoms: data.summary.symptoms || [],
+            causes: data.summary.causes || [],
+            treatments: data.summary.treatments || [],
+            specialty: data.summary.specialty || "",
+          };
+          
+          // Only set summary if we don't already have a valid one (avoid overwriting newly generated summaries)
+          setSummary(prev => {
+            // If current summary is empty/invalid, use the loaded one
+            if (!prev.diagnosis || 
+                prev.diagnosis === "Not enough information" || 
+                prev.diagnosis.trim() === "") {
+              return loadedSummary;
+            }
+            // Otherwise keep the current summary
+            return prev;
+          });
+          
+          // Auto-update chat title to diagnosis if title wasn't manually changed
+          const titleManuallyChanged = data.isTitleManuallyChanged || false;
+          if (!titleManuallyChanged && loadedSummary.diagnosis) {
+            console.log('📝 Auto-updating chat title to diagnosis from loaded summary:', loadedSummary.diagnosis);
+            const chatRef = doc(db, 'chats', chatId);
+            updateDoc(chatRef, {
+              title: loadedSummary.diagnosis,
+            }).catch(err => {
+              console.error('Error updating chat title:', err);
+            });
+            setChatTitle(loadedSummary.diagnosis);
+          }
+        }
       }
     });
   
@@ -110,7 +220,7 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
   const summaryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastMessageCountRef = useRef(0);
   const isGeneratingSummaryRef = useRef(false);
-  
+
   useEffect(() => {
     // Only generate summary if message count actually increased (new messages added)
     // and we're not already generating a summary
@@ -158,6 +268,93 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
            summary.diagnosis.trim() !== "";
   };
 
+  // Save summary to Firestore
+  const saveSummaryToFirestore = async (summaryToSave: Summary) => {
+    console.log('💾 saveSummaryToFirestore called');
+    console.log('💾 chatId:', chatId);
+    console.log('💾 summaryToSave:', JSON.stringify(summaryToSave, null, 2));
+    
+    try {
+      if (!chatId) {
+        console.warn('⚠️ Cannot save summary: chatId is missing');
+        return;
+      }
+
+      // Only save if summary is valid
+      if (!summaryToSave.diagnosis || 
+          summaryToSave.diagnosis === "Not enough information" || 
+          summaryToSave.diagnosis.trim() === "") {
+        console.log('⏭️ Skipping summary save - not enough information');
+        console.log('   diagnosis value:', summaryToSave.diagnosis);
+        return;
+      }
+
+      console.log('💾 Summary is valid, proceeding to save...');
+      const chatRef = doc(db, 'chats', chatId);
+      
+      const summaryData: any = {
+        summary: {
+          diagnosis: summaryToSave.diagnosis,
+          symptoms: summaryToSave.symptoms,
+          causes: summaryToSave.causes,
+          treatments: summaryToSave.treatments,
+          specialty: summaryToSave.specialty,
+        },
+        summaryUpdatedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      };
+      
+      // Auto-update chat title to diagnosis if title wasn't manually changed
+      if (!isTitleManuallyChanged && summaryToSave.diagnosis) {
+        console.log('📝 Auto-updating chat title to diagnosis:', summaryToSave.diagnosis);
+        summaryData.title = summaryToSave.diagnosis;
+        setChatTitle(summaryToSave.diagnosis);
+      }
+      
+      console.log('💾 Summary data to save:', JSON.stringify(summaryData, null, 2));
+      console.log('💾 Calling updateDoc...');
+      
+      await updateDoc(chatRef, summaryData);
+
+      console.log('✅ Summary saved to Firestore successfully');
+    } catch (error) {
+      console.error('❌ Error saving summary to Firestore:', error);
+      console.error('❌ Error details:', JSON.stringify(error, null, 2));
+      // Don't show alert to user - this is a background operation
+    }
+  };
+
+  // Fast loading: Set cached summary immediately if enabled (for demo)
+  useEffect(() => {
+    if (ENABLE_FAST_SUMMARY_LOADING) {
+      // Check if summary is already set (avoid unnecessary updates)
+      if (hasValidSummary()) {
+        return;
+      }
+
+      // Check if we should use cached summary (for demo purposes)
+      const hasBotMessages = messages.some(m => m.sender === 'bot' && m.text);
+      const shouldUseCached = hasBotMessages && messages.some(m => {
+        const text = (m.text || '').toLowerCase();
+        return text.includes('benign keratosis') || 
+               text.includes('seborrheic keratosis') || 
+               text.includes('keratosis') ||
+               text.includes('skin lesion') ||
+               text.includes('diagnosis');
+      });
+
+      // For demo: if there are bot messages mentioning diagnosis/keratosis, use cached summary
+      if (shouldUseCached) {
+        console.log('🚀 Setting cached summary for Benign Keratosis (fast loading)');
+        const cachedSummary = cachedSummaryBenignKeratosis as Summary;
+        setSummary(cachedSummary);
+        
+        // Save cached summary to Firestore
+        saveSummaryToFirestore(cachedSummary);
+      }
+    }
+  }, [messages.length]); // Re-check when message count changes
+
   const openDrawer = () => {
     Keyboard.dismiss();
     setDrawerVisible(true);
@@ -201,6 +398,16 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
         method: 'POST',
         body: requestBody
       });
+      
+      // Debug: Log what message value is being sent for image uploads
+      if (imageUrl) {
+        console.log('📸 Image upload - message value being sent:', `'${requestBody.message}' (length: ${requestBody.message.length})`);
+        if (requestBody.message && requestBody.message.trim()) {
+          console.warn('⚠️ Image upload has non-empty message:', requestBody.message);
+        } else {
+          console.log('✅ Image upload has empty message as expected');
+        }
+      }
 
       const response = await fetch(BACKEND_URL, {
         method: 'POST',
@@ -230,6 +437,28 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
         console.error('🔴 Backend API Response is not valid JSON:', parseError);
         console.log('🟡 Returning raw response text');
         return responseText || "Sorry, something went wrong.";
+      }
+
+      // If this is a report response, extract and save summary
+      console.log('🔍 Checking response type:', data.response_type);
+      console.log('🔍 Has report data at top level?', !!data.report);
+      console.log('🔍 Has report data in metadata?', !!data.metadata?.report);
+      console.log('🔍 Full response data keys:', Object.keys(data));
+      
+      // Report is nested inside metadata.report, not at top level
+      if (data.response_type === 'report' && data.metadata?.report) {
+        console.log('📊 Report response detected, extracting summary...');
+        console.log('📊 Report data:', JSON.stringify(data.metadata.report, null, 2));
+        console.log('📊 Metadata data:', JSON.stringify(data.metadata, null, 2));
+        // Don't await - let it run in background
+        extractSummaryFromReport(data).catch(err => {
+          console.error('❌ Error extracting summary from report:', err);
+        });
+      } else {
+        console.log('⚠️ Not a report response or missing report data');
+        console.log('   response_type:', data.response_type);
+        console.log('   has report (top level):', !!data.report);
+        console.log('   has report (in metadata):', !!data.metadata?.report);
       }
 
       // Check various possible response formats
@@ -262,14 +491,38 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
     const userMessageText = input;
     setInput(''); // Clear input immediately for better UX
     
+    // Optimistic UI update: Add user message immediately to local state
+    const tempId = `temp-${Date.now()}`;
+    const optimisticUserMessage: Message = {
+      id: tempId,
+      text: userMessageText,
+      user: auth.currentUser?.displayName || 'You',
+      userId: auth.currentUser?.uid || '',
+      sender: 'user',
+      createdAt: Timestamp.now(),
+    };
+    
+    // Add optimistic message immediately
+    setMessages(prev => [...prev, optimisticUserMessage]);
+    
+    // Scroll to bottom to show the new message
+    setTimeout(() => {
+      flatListRef.current?.scrollToEnd({ animated: true });
+    }, 100);
+    
     // Send to backend - backend will handle saving to Firestore
     // The Firestore listener will pick up the messages when backend saves them
+    // The real message from Firestore will replace the optimistic one
     try {
       await getGeminiResponse(userMessageText);
       // Backend handles saving both user and bot messages to Firestore
       // Frontend just listens via onSnapshot to update UI
     } catch (error) {
       console.error('Error sending message:', error);
+      // Remove optimistic message on error
+      setMessages(prev => prev.filter(msg => msg.id !== tempId));
+      // Restore input
+      setInput(userMessageText);
       // Optionally show error to user
       Alert.alert('Error', 'Failed to send message. Please try again.');
     }
@@ -278,7 +531,7 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
   const uploadImageAsync = async (uri: string, chatId: string) => {
     try {
       // Fetch the image as a blob for React Native
-      const response = await fetch(uri);
+    const response = await fetch(uri);
       
       // Check if response is ok
       if (!response.ok) {
@@ -286,12 +539,12 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
       }
       
       // Convert to blob
-      const blob = await response.blob();
+    const blob = await response.blob();
       
-      const filename = `chats/${chatId}/${Date.now()}.jpg`;
-      const storageRef = ref(storage, filename);
-      await uploadBytes(storageRef, blob);
-      return await getDownloadURL(storageRef);
+    const filename = `chats/${chatId}/${Date.now()}.jpg`;
+    const storageRef = ref(storage, filename);
+    await uploadBytes(storageRef, blob);
+    return await getDownloadURL(storageRef);
     } catch (error) {
       console.error('Error uploading image:', error);
       throw error;
@@ -367,6 +620,26 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
       const imageUrl = await uploadImageAsync(localUri, chatId);
       setImages(prev => [...prev, imageUrl]);
   
+      // Optimistic UI update: Add user message with image immediately to local state
+      const tempId = `temp-image-${Date.now()}`;
+      const optimisticUserMessage: Message = {
+        id: tempId,
+        text: '', // Empty text as requested
+        user: auth.currentUser?.displayName || 'You',
+        userId: auth.currentUser?.uid || '',
+        sender: 'user',
+        image: imageUrl,
+        createdAt: Timestamp.now(),
+      };
+      
+      // Add optimistic message immediately
+      setMessages(prev => [...prev, optimisticUserMessage]);
+      
+      // Scroll to bottom to show the new message
+      setTimeout(() => {
+        flatListRef.current?.scrollToEnd({ animated: true });
+      }, 100);
+  
       // Update chat timestamp
       await updateDoc(doc(db, `chats/${chatId}`), {
         last_message_at: serverTimestamp()
@@ -375,7 +648,14 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
       // Send Firebase Storage URL to backend API
       // Backend will download from this URL and process the image
       // Backend will handle saving both user message (with image) and bot response to Firestore
-      await getGeminiResponse('', imageUrl);
+      // Pass empty string for message to ensure no placeholder text
+      try {
+        await getGeminiResponse('', imageUrl);
+      } catch (error) {
+        // Remove optimistic message on error
+        setMessages(prev => prev.filter(msg => msg.id !== tempId));
+        throw error;
+      }
   
     } catch (error) {
       console.error("Image upload or analysis failed:", error);
@@ -424,17 +704,17 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
                 </Text>
               )
             )
-          }
-        </TouchableOpacity>
+        }
+      </TouchableOpacity>
         {expandedCard === key && canExpand ? (
-          <View style={styles.expandedCardContent}>
-            <Component chatId={chatId} />
-          </View>
-        ) : (
-          null
-        )}
-      </View>
-    );
+        <View style={styles.expandedCardContent}>
+          <Component chatId={chatId} />
+        </View>
+      ) : (
+        null
+      )}
+    </View>
+  );
   };
 
   const markdownStyles = {
@@ -488,8 +768,13 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
       const chatRef = doc(db, 'chats', chatId);
       await updateDoc(chatRef, {
         title: newTitle.trim(),
+        isTitleManuallyChanged: true, // Mark that user manually changed the title
         updatedAt: serverTimestamp(),
       });
+  
+      // Update local state
+      setIsTitleManuallyChanged(true);
+      setChatTitle(newTitle.trim());
   
       // Optional: Close settings drawer or show confirmation
       // setSettingsVisible(false);
@@ -497,6 +782,119 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
       Alert.alert("Success", "Chat title has been updated.");
     } catch (error) {
       console.error("Failed to rename chat:", error);
+    }
+  };
+
+  // Extract summary from agent report response
+  const extractSummaryFromReport = async (responseData: any) => {
+    console.log('🔧 extractSummaryFromReport called');
+    console.log('🔧 responseData keys:', Object.keys(responseData));
+    try {
+      const report = responseData.report || responseData.metadata?.report || {};
+      const metadata = responseData.metadata || {};
+      
+      console.log('🔧 Report object keys:', Object.keys(report));
+      console.log('🔧 Metadata object keys:', Object.keys(metadata));
+      console.log('🔧 Report data:', JSON.stringify(report, null, 2));
+      console.log('🔧 Metadata data:', JSON.stringify(metadata, null, 2));
+      
+      // Extract diagnosis
+      const diagnosis = report.disease_type || 
+                       metadata.diagnosis?.diagnosis_name || 
+                       "Not enough information";
+      
+      console.log('🔧 Extracted diagnosis:', diagnosis);
+      
+      // Extract symptoms
+      let symptoms: string[] = [];
+      if (report.symptoms && report.symptoms !== "None mentioned") {
+        if (Array.isArray(report.symptoms)) {
+          symptoms = report.symptoms;
+        } else if (typeof report.symptoms === 'string') {
+          // Try to parse if it's a comma-separated string
+          symptoms = report.symptoms.split(',').map((s: string) => s.trim()).filter((s: string) => s.length > 0);
+          if (symptoms.length === 0) {
+            symptoms = ["Not enough information"];
+          }
+        }
+      } else {
+        symptoms = ["Not enough information"];
+      }
+      
+      // Extract causes (from report output or other_information)
+      let causes: string[] = [];
+      const causeText = report.other_information || report.output || '';
+      if (causeText && causeText !== "Not enough information") {
+        // Try to extract causes from the text
+        // For now, we'll use a simple approach - split by sentences or use the whole text
+        const sentences = causeText.split(/[.!?]\s+/).filter((s: string) => s.trim().length > 0);
+        causes = sentences.slice(0, 5); // Limit to 5 causes
+        if (causes.length === 0) {
+          causes = ["Not enough information"];
+        }
+      } else {
+        causes = ["Not enough information"];
+      }
+      
+      // Extract treatments (from report output, home_remedy_details, or recommendations)
+      let treatments: string[] = [];
+      const treatmentSources = [
+        report.home_remedy_details,
+        report.output,
+        ...(Array.isArray(report.recommendations) ? report.recommendations : [])
+      ].filter(Boolean);
+      
+      if (treatmentSources.length > 0) {
+        // Combine all treatment sources and extract key points
+        const treatmentText = treatmentSources.join(' ');
+        const sentences = treatmentText.split(/[.!?]\s+/).filter((s: string) => s.trim().length > 0);
+        treatments = sentences.slice(0, 6); // Limit to 6 treatments
+        if (treatments.length === 0) {
+          treatments = ["Not enough information"];
+        }
+      } else {
+        treatments = ["Not enough information"];
+      }
+      
+      // Extract specialty from recommended_specialist
+      let specialty = '';
+      if (report.recommended_specialist) {
+        const specialist = report.recommended_specialist.toLowerCase();
+        if (specialist.includes('dermatologist') || specialist.includes('dermatology')) {
+          specialty = 'Dermatology';
+        } else if (specialist.includes('dentist') || specialist.includes('dental')) {
+          specialty = 'Dental';
+        } else {
+          specialty = report.recommended_specialist;
+        }
+      } else if (report.speciality) {
+        // Fallback to speciality field
+        specialty = report.speciality === 'skin' ? 'Dermatology' : 
+                   report.speciality === 'dental' ? 'Dental' : 
+                   report.speciality;
+      }
+      
+      const extractedSummary: Summary = {
+        diagnosis,
+        symptoms,
+        causes,
+        treatments,
+        specialty
+      };
+      
+      console.log('✅ Summary extracted from report:', JSON.stringify(extractedSummary, null, 2));
+      console.log('✅ Setting summary to state...');
+      setSummary(extractedSummary);
+      
+      // Save summary to Firestore
+      console.log('💾 Calling saveSummaryToFirestore...');
+      await saveSummaryToFirestore(extractedSummary);
+      console.log('💾 saveSummaryToFirestore completed');
+      
+      return extractedSummary;
+    } catch (error) {
+      console.error('❌ Error extracting summary from report:', error);
+      return null;
     }
   };
 
@@ -512,7 +910,8 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
           onPress: async () => {
             try {
               await deleteDoc(doc(db, "chats", chatId));
-              router.replace('/dashboard')
+              // Dashboard redirects to category-selection, so navigate there directly
+              router.replace('/category-selection');
             } catch (error) {
               Alert.alert("Error", "Could not delete chat.");
             }
@@ -524,6 +923,27 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
   };
 
   const generateSummary = async (msgs: Message[]) => {
+    // Fast loading: Use cached summary for Benign Keratosis demo
+    if (ENABLE_FAST_SUMMARY_LOADING) {
+    const relevantTexts = msgs
+        .filter(m => m.sender === 'bot' && m.text && !m.text.includes("[Image]") && !m.text.includes("Rate limit"))
+      .map(m => m.text)
+      .join('\n');
+  
+      // Check if conversation mentions Benign Keratosis
+      const textLower = relevantTexts.toLowerCase();
+      if (textLower.includes('benign keratosis') || textLower.includes('seborrheic keratosis') || textLower.includes('keratosis')) {
+        console.log('🚀 Using cached summary for Benign Keratosis (fast loading)');
+        const cachedSummary = cachedSummaryBenignKeratosis as Summary;
+        setSummary(cachedSummary);
+        
+        // Save cached summary to Firestore
+        await saveSummaryToFirestore(cachedSummary);
+        
+        return cachedSummary;
+      }
+    }
+
     // Prevent summary generation if we're in the middle of a chat
     // Only generate summary for completed conversations
     const recentMessages = msgs.slice(-5); // Check last 5 messages
@@ -571,10 +991,10 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
       `;
   
     try {
-      const responseText = await getGeminiResponse(geminiPrompt);
+    const responseText = await getGeminiResponse(geminiPrompt);
 
       console.log("📋 Summary responseText", responseText);
-  
+
       if (
         !responseText.includes('{') ||
         !responseText.includes('}')
@@ -590,12 +1010,16 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
       }
       
       const cleanJson = responseText
-        .replace(/```json|```/g, '') // Remove Markdown blocks
-        .trim();
+      .replace(/```json|```/g, '') // Remove Markdown blocks
+      .trim();
 
       const parsed: Summary = JSON.parse(cleanJson);
       setSummary(parsed);
       console.log('✅ Summary generated successfully');
+      
+      // Save summary to Firestore
+      await saveSummaryToFirestore(parsed);
+      
       return parsed;
     } catch (err) {
       console.error("❌ Summary generation error:", err);
@@ -616,12 +1040,15 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
               {/* Header section */}
               <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
               <View style={styles.header}>
-                <TouchableOpacity onPress={() => router.replace('/dashboard')}>
+                <TouchableOpacity onPress={() => {
+                  // Dashboard redirects to category-selection, so navigate there directly
+                  router.replace('/category-selection');
+                }}>
                   <Ionicons name="chevron-back" size={28} color="#000" />
                 </TouchableOpacity>
                 <View style={styles.headerLogoContainer}>
                   <Image source={headerLogo} style={styles.headerLogo} resizeMode="contain" />
-                </View>
+                      </View>
                 <View style={styles.headerIcons}>
                   <TouchableOpacity onPress={openDrawer} style={styles.doctorIconButton}>
                     <Image source={doctorIcon} style={styles.doctorIcon} resizeMode="contain" />
@@ -663,7 +1090,9 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
                         <Text style={styles.sender}>Viscura</Text>
                       )}
                       {item.image && <Image source={{ uri: item.image }} style={styles.imagePreview} />}
+                      {item.text && item.text.trim() && (
                       <Markdown style={markdownStyles}>{item.text}</Markdown>
+                      )}
                     </View>
                   </View>
                 )}
@@ -710,7 +1139,7 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
               <Animated.View style={[styles.drawer, { transform: [{ translateX: slideAnim }] }]}>
                 <View style={styles.drawerHeader}>
                   <TouchableOpacity onPress={closeDrawer} style={{ marginRight: 12 }}>
-                    <Ionicons name="chevron-forward" size={28} color="#000" />
+                    <Ionicons name="chevron-back" size={28} color="#000" />
                   </TouchableOpacity>
                   <Text style={styles.drawerTitle}>Back to Chat</Text>
                   <TouchableOpacity onPress={openSettingsDrawer} style={{ marginLeft: 'auto' }}>

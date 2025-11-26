@@ -22,8 +22,8 @@ export default function LoginScreen() {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
       
-      // Navigate to user dashboard for all authenticated users
-      router.push('/user-dashboard');
+      // Navigate to category selection for all authenticated users
+      router.push('/category-selection');
     } catch (err: any) {
       Alert.alert('Login Failed', err.message, [{ text: 'OK', style: 'destructive' }]);
     }
@@ -33,8 +33,8 @@ export default function LoginScreen() {
     try {
       setError('');
       const result = await signInWithGoogle();
-      // Navigate to user dashboard
-      router.push('/user-dashboard');
+      // Navigate to category selection
+      router.push('/category-selection');
     } catch (error: any) {
       // Handle cancellation silently - no error shown
       if (error.isCancellation || error.message === 'SIGN_IN_CANCELLED') {
@@ -66,8 +66,8 @@ export default function LoginScreen() {
       }
       setError('');
       const result = await signInWithApple();
-      // Navigate to user dashboard
-      router.push('/user-dashboard');
+      // Navigate to category selection
+      router.push('/category-selection');
     } catch (error: any) {
       // Handle cancellation silently - no error shown
       if (error.isCancellation || error.message === 'SIGN_IN_CANCELLED') {

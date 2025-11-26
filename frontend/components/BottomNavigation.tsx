@@ -12,7 +12,7 @@ interface BottomNavigationProps {
 export default function BottomNavigation({ activeTab }: BottomNavigationProps) {
 
   const handleDashboardPress = () => {
-    router.push('/user-dashboard');
+    router.push('/category-selection');
   };
 
   const handleChatPress = () => {

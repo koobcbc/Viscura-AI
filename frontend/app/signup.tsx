@@ -96,8 +96,8 @@ export default function SignupScreen() {
     try {
       setErrors({});
       const result = await signInWithGoogle();
-      // Navigate to user dashboard
-      router.push('/user-dashboard');
+      // Navigate to category selection
+      router.push('/category-selection');
     } catch (error: any) {
       // Handle cancellation silently - no error shown
       if (error.isCancellation || error.message === 'SIGN_IN_CANCELLED') {
@@ -129,8 +129,8 @@ export default function SignupScreen() {
       }
       setErrors({});
       const result = await signInWithApple();
-      // Navigate to user dashboard
-      router.push('/user-dashboard');
+      // Navigate to category selection
+      router.push('/category-selection');
     } catch (error: any) {
       // Handle cancellation silently - no error shown
       if (error.isCancellation || error.message === 'SIGN_IN_CANCELLED') {
