@@ -142,8 +142,6 @@ By providing instant triage, symptom clarification, and specialist routing, Visc
 
 **Continuous Learning AI** — Implement self-improving AI models that learn from new patient cases and doctor feedback in real-time through active learning pipeline and physician feedback integration.
 
-**Additional Planned Features** — Multi-language support (Spanish, Mandarin, Hindi, 10+ languages), telemedicine integration with direct video consultation booking, insurance verification with real-time coverage checks, prescription management with e-prescription integration, wearable integration with Apple Health and Google Fit, mental health module, chronic disease management, and family health profiles.
-
 ---
 
 ## About the Team
