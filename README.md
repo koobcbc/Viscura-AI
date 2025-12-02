@@ -4,40 +4,47 @@
 
 # Viscura: Next-Gen Agentic AI for Dermatology and Dentistry
 
-**Transforming healthcare accessibility through intelligent diagnostics and smart care navigation**
+> **A multi-agent, AI-powered virtual triage system that helps users understand symptoms, analyze images, and find the right doctor instantly.**
 
 </div>
 
 
----
-
 ## Table of Contents
 
-1. [The Problem](#the-problem)
-2. [The Solution: Viscura](#the-solution-viscura)
-3. [Core Capabilities](#core-capabilities)
-   - [Conversational Clinical Agents](#1-conversational-clinical-agents)
-   - [Vision Intelligence](#2-vision-intelligence)
-   - [SMART Care Navigation](#3-smart-care-navigation)
-4. [Component Documentation](#component-documentation)
-   - [Supervisor Agent](#supervisor-agent)
-   - [Skin Specialist Agent](#skin-specialist-agent)
-   - [Oral Health Agent](#oral-health-agent)
-   - [Vision Agent](#vision-agent)
-   - [Reporting Agent](#reporting-agent)
-   - [Frontend Application](#frontend-application)
-5. [Technology Stack](#technology-stack)
-6. [Deployment Guide](#deployment-guide)
-7. [API Documentation](#api-documentation)
-8. [Future Scope](#future-scope)
+1. [Project Motivation](#-project-motivation)
+2. [Overview of Viscura](#overview-of-viscura)
+3. [The Solution](#the-solution-viscura)
+4. [Competitive Edge](#our-competitive-edge)
+5. [Key Features](#key-features)
+6. [Core Capabilities](#core-capabilities)
+7. [Viscura’s Market Fit and Impact](#viscuras-market-fit-and-impact)
+8. [For Developers](#for-developers)
+9. [Component Documentation](#component-documentation)
+10. [Technology Stack](#technology-stack)
+11. [Deployment Guide](#deployment-guide)
+12. [API Documentation](#api-documentation)
+13. [Future Scope](#future-scope)
+14. [About the Team](#about-the-team)
 
----
 
-## The Problem
+## 🔎 Project Motivation
 
-### The Reality Patients Face Today
+Meet Alex, a grad student who woke up with a swollen eye and a painful rash on his hand.
 
-Healthcare accessibility remains a critical challenge affecting billions worldwide:
+- The campus wellness center had **no appointments for the entire week**
+- He was **in extreme pain**, anxious and unable to focus on work
+- As a student carefully watching every dollar, he hesitated to go to the **ER** and risk a huge bill
+- He didn’t know:  
+  - *How serious is this?*  
+  - *Can I manage the pain safely at home?*  
+  - *Do I need an ophthalmologist, a dermatologist, or urgent care?*
+
+This experience exposed a painful gap: there was **no simple, affordable way** for someone like Alex to:
+1. Get a **quick, trustworthy triage** based on symptoms and photos  
+2. Understand **how serious** the issue is and what to do *right now*  
+3. Know **which specialist** to see and **where to find them**  
+
+Viscura was born to close this gap.
 
 #### **The Scale of the Problem**
 
@@ -47,30 +54,55 @@ Healthcare accessibility remains a critical challenge affecting billions worldwi
 ### **The Four Major Pain Points**
 
 #### **a. Delayed Access: Too Long to Reach the Doctor**
-- Average wait time to see a specialist in the US is very long
-- Emergency room visits for non-emergencies waste valuable time and resources
-- Working professionals lose productivity traveling to multiple appointments
-- Critical conditions worsen during waiting periods
+- Specialist appointment wait times are often weeks or months
+- Non-emergency ER visits waste time and strain the system
+- Travel and multiple appointments reduce productivity
+- Delays worsen conditions and increase anxiety
+> For Alex, this meant spending days in pain waiting for a wellness center appointment that never came.
 
 #### **b. Doctor Dilemma: Which Specialist Should I See?**
-- Patients don't know which specialist to consult
-- **Primary care physicians (PCPs) act as gatekeepers**, adding an extra unnecessary step
-- Misdiagnosis or delayed diagnosis due to seeing the wrong specialist first
-- Multiple referrals waste time and money
+- Patients often don’t know which specialist to visit
+- **Primary care physicians (PCPs)** referrals add extra wait time and cost
+- Seeing the wrong specialist leads to delays
+- Multiple referrals increase financial and time burden
 
 #### **c. Uncertainty: Serious Problem or Home Remedy?**
-- Inability to distinguish between conditions requiring immediate care vs. home remedies
-- Anxiety and stress from not knowing the severity of symptoms
-- Delayed treatment due to hesitation about seeking medical help
-- Fear of overreacting leads to undertreatment
+- Hard to know what’s serious and what’s treatable at home
+- Not knowing severity causes anxiety and stress
+- Hesitation delays necessary care
+- Fear of **overreacting** leads to undertreatment
 
 #### **d. Costly Missteps: Financial Burden**
-- **Time, money, and effort lost before getting the correct diagnosis**
-- Multiple doctor visits to find the right specialist
-- Unnecessary emergency room visits
-- Lost wages from taking time off work for appointments
+- Multiple visits before correct diagnosis increase cost
+- Unnecessary ER trips add financial burden
+- Taking time off work reduces income
+- Inefficiencies drain both money and time
 
----
+
+## Overview of Viscura
+
+Viscura is an AI-powered virtual triage assistant for **dermatology and dentistry**.
+
+From a single mobile app, users can:
+- Describe their symptoms in natural language
+- Upload images of skin or oral issues from their smartphone
+- Receive an **AI-driven preliminary assessment** and severity estimate
+- Get **clear, human-readable guidance** on what to do *right now*
+- See **which type of doctor** they should see and **where to find them nearby**
+
+Under the hood, Viscura combines:
+- **Conversational clinical agents** that mimic real clinical interviews
+- **Medical-grade computer vision models** that outperform general-purpose multimodal LLMs
+- **Smart care navigation** that routes patients to the right specialist using location data (Maps)
+
+## Who This Repository Is For
+
+This repository is intended for:
+- **Developers** building or extending multi-agent AI healthcare systems  
+- **Health tech researchers** evaluating AI-driven triage designs  
+- **Clinicians and domain experts** reviewing diagnostic workflows  
+- **Students and builders** exploring medical CV + LLM agents  
+
 
 ## The Solution: Viscura
 
@@ -82,40 +114,39 @@ Viscura revolutionizes healthcare delivery through AI-powered virtual triage and
 **Get accurate preliminary assessments without visiting a lab**
 
 - **No lab visits required** for initial assessment
-- Upload images of skin or oral conditions from your smartphone
-- Receive AI-powered analysis within minutes
-- Accessible 24/7 from the comfort of your home
+- Upload photos directly from your phone
+- Get analysis within minutes
+- Available anytime, anywhere
 
 ### **b. Right Doctor, Right Away**
 **Get recommended with the correct specialist instantly**
 
-- **Skip the PCP** and go directly to the right specialist
-- AI determines the exact specialty needed based on your diagnosis
-- Find nearby specialists using integrated Google Maps
-- No more guessing or wasted referrals
+- **Skip the PCP gatekeeping**
+- AI identifies the exact specialist needed
+- Integrated map search for nearby providers
+- Eliminates guesswork and wasted referrals
 
 ### **c. Know What to Do Immediately**
 **Understand your condition, immediate steps, or safe home remedies**
 
 - **Immediate diagnosis** with detailed, patient-friendly explanations
-- **Severity assessment** to determine urgency
-- **Home remedy recommendations** for non-critical conditions
-- **Immediate care steps** while waiting for doctor appointments
-- Clear guidance on when to seek emergency care
+- **Severity assessment** (mild, moderate, urgent)
+- Smart home-care suggestions for mild cases
+- Immediate steps to follow while waiting for care
+- Alerts for when emergency care is required
 
 ### **d. Rapid, Cost-Effective Path**
 **Efficient route to the right diagnosis**
 
 - Save time with direct-to-specialist navigation
 - Reduce costs by eliminating unnecessary visits
-- Get accurate information on the first try
-- Peace of mind through instant expert guidance
+- Improve accuracy with AI-driven guidance
+- Peace of mind through instant answers
 
----
 
 ## Our Competitive Edge
 
-### **VISCURA CV MODELS OUTPERFORMED LLMS**
+### **Viscura CV Models Outperform LLMs**
 
 **Custom-trained Computer Vision models achieve >90% diagnostic accuracy, outperforming multimodal LLMs by 40%** for dermatology and oral health conditions.
 
@@ -124,15 +155,22 @@ Viscura revolutionizes healthcare delivery through AI-powered virtual triage and
 | Approach | Accuracy | Key Finding |
 |----------|----------|-------------|
 | **Commercial Multimodal LLMs** | ~45-55% | Only 45% accuracy across three skin cancer classes, highlighting limitations in detecting subtle visual cues |
-| **Viscura Custom CV Models** | **88-89%** | Efficient Net Finetuned Models achieve superior performance with specialized training |
+| **Viscura Custom CV Models** | **88-89%** | EfficientNet fine-tuned models achieve superior performance with specialized training |
 
 **Why Our Models Excel:**
 - Trained on curated dermatology and oral health datasets
 - Fine-tuned specifically for medical-grade diagnosis
-- Optimized to detect subtle visual cues critical for accurate diagnosis
-- Continuously improved with real-world patient data
+- Captures subtle clinical features missed by LLMs
+- Continuously improved with real-world data
 
----
+## Key Features
+
+- 🩺 **Instant Virtual Triage** – Get a fast, AI-powered assessment based on your symptoms and photos.
+- 🧠 **Clinical-Style Q&A** – Agents ask medically relevant questions like a real clinician, not a generic chatbot.
+- 📸 **Smart Image Analysis** – Upload images of rashes or oral issues from your smartphone, models detect likely conditions.
+- 🚦 **Severity & Next Steps** – See if your issue looks mild, moderate, or urgent, with clear do/don’t guidance.
+- 🧭 **Right Doctor, Right Away** – Skip the guesswork. Viscura tells you *which* specialist to see.
+- 📍**Nearby Specialists** – Integrated Maps to find providers near you (current or planned).
 
 ## Core Capabilities
 
@@ -250,7 +288,33 @@ Our platform integrates real-time location to recommend **the right doctor or sp
 
 **No more guessing which doctor to see** – Viscura routes you directly to specialists who can treat your specific condition.
 
----
+## Viscura’s Market Fit and Impact
+
+Viscura targets patients who:
+- Experience **sudden skin or oral issues** (rashes, swelling, pain)
+- Face **long wait times** for specialist appointments
+- Are **cost-sensitive** and hesitant to go to the ER
+- Are unsure **how serious** their condition is or **which doctor** to see
+- Who has very low access to the hospitals and treatments
+
+By providing instant triage, symptom clarification, and specialist routing, Viscura:
+- Reduces unnecessary ER visits
+- Helps patients seek care earlier for serious issues
+- Gives students and working professionals peace of mind and actionable next steps
+- Supports overloaded healthcare systems by better triaging non-emergent cases
+
+# For Developers
+
+## Architecture at a Glance
+
+At a high level, Viscura consists of:
+
+- 🧠 **Supervisor Agent (LangGraph)** – Orchestrates the full journey and routes conversations to the right clinical agent.
+- 🩹 **Skin & Oral Specialist Agents** – Run structured clinical interviews and collect medically relevant metadata.
+- 👁️ **Vision Agent + CV Models** – Validate images, route them to the correct CV model, and produce disease predictions.
+- 📄 **Reporting Agent** – Combines chat, metadata, and image predictions into a patient-friendly clinical report.
+- 📱 **React Native App** – Mobile interface for patients: chat, image upload, report viewing, and doctor finder.
+- ☁️ **GCP + Firebase** – Cloud Run for agents, Firestore/Firebase Storage for chat and images, Vertex AI Gemini & Vision.
 
 ## Component Documentation
 
@@ -1116,7 +1180,6 @@ The complete patient journey through Viscura's multi-agent system:
 13. Patient views nearby specialists via Google Maps integration
 ```
 
----
 
 ## Future Scope
 
@@ -1175,8 +1238,14 @@ Viscura is continuously evolving to expand healthcare accessibility and improve 
 - **Chronic Disease Management**: Long-term monitoring for conditions like eczema, psoriasis
 - **Family Health Profiles**: Manage health for multiple family members
 
----
 
 ## **Viscura** - *Empowering patients with intelligent healthcare navigation*
 
 **Making healthcare accessible, affordable, and immediate for everyone.**
+
+## About the Team
+
+- 👨‍💻 [Katy Koo](https://github.com/koobcbc)
+- 👩‍⚕️ [Mahender Reddy Pokala](https://github.com/Mahenderreddyp)
+- 👨‍💻 [Rohit Kumar](https://github.com/rohitch13)
+- 👩‍💻 [Ulka Khobragade](https://github.com/ulka98)
