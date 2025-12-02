@@ -65,6 +65,8 @@ Viscura revolutionizes healthcare delivery through AI-powered virtual triage and
 
 **Rapid, Cost-Effective Path** — Save time with direct-to-specialist navigation. Reduce costs by eliminating unnecessary visits. Improve accuracy with AI-driven guidance and gain peace of mind through instant answers.
 
+<img width="359" height="750" alt="image" src="https://github.com/user-attachments/assets/87163fe4-7fb0-4eea-be53-33fcb40ed10e" />
+
 ---
 
 ## Competitive Edge
@@ -98,15 +100,19 @@ Viscura employs a LangGraph-based supervisor-agent architecture that orchestrate
 
 ### 2. Vision Intelligence
 
-Specialized medical-grade vision models trained on curated dermatology and oral health datasets. Our models achieve greater than 90% diagnostic accuracy (F1 Score: 89% for skin, 85% for oral), enabling early detection of skin and oral conditions in real-time, directly from a smartphone camera.
+Specialized medical-grade vision models trained on curated dermatology and oral health datasets. Our models achieve ~90% diagnostic accuracy, enabling early detection of skin and oral conditions in real-time, directly from a smartphone camera.
 
 The process flow includes image upload from smartphone, quality validation using Gemini Vision, content matching to ensure image matches reported condition type, disease classification by custom CV models, confidence scoring, and expert validation.
+
+<img width="1108" height="502" alt="image" src="https://github.com/user-attachments/assets/988fbc7c-ad3e-4e65-bee1-061182016dfd" />
 
 ### 3. Smart Care Navigation
 
 Location-based specialist recommendations integrated with real-time mapping. Users instantly receive curated referrals to qualified healthcare providers near them based on AI diagnosis. Specialty-matched recommendations, location-aware search using Google Maps API, real-time availability and contact information, and direct navigation to healthcare providers.
 
 No more guessing which doctor to see—Viscura routes you directly to specialists who can treat your specific condition.
+
+<img width="301" height="593" alt="image" src="https://github.com/user-attachments/assets/be10d351-0629-49e9-9de6-2ec77ba02aad" /> <img width="282" height="589" alt="image" src="https://github.com/user-attachments/assets/5ea6abd9-1b16-4f01-8171-17acc7b4f177" />
 
 ---
 
