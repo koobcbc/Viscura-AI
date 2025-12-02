@@ -73,12 +73,12 @@ Viscura revolutionizes healthcare delivery through AI-powered virtual triage and
 
 ## Competitive Edge
 
-**Custom-trained Computer Vision models achieve greater than 90% diagnostic accuracy, outperforming multimodal LLMs by 40%** for dermatology and oral health conditions.
+**Custom-trained Computer Vision models ~90% diagnostic accuracy, outperforming multimodal LLMs by 45%** for dermatology and oral health conditions.
 
 | Approach | Accuracy | Key Finding |
 |----------|----------|-------------|
-| **Commercial Multimodal LLMs** | ~45-55% | Only 45% accuracy across three skin cancer classes, highlighting limitations in detecting subtle visual cues |
-| **Viscura Custom CV Models** | **88-89%** | EfficientNet fine-tuned models achieve superior performance with specialized training |
+| **Commercial Multimodal LLMs** | ~30-45% | Highlighting limitations in detecting subtle visual cues |
+| **Viscura Custom CV Models** | **~90%** | EfficientNet fine-tuned models achieve superior performance with specialized training |
 
 **Why Our Models Excel**
 
