@@ -65,7 +65,9 @@ Viscura revolutionizes healthcare delivery through AI-powered virtual triage and
 
 **Rapid, Cost-Effective Path** — Save time with direct-to-specialist navigation. Reduce costs by eliminating unnecessary visits. Improve accuracy with AI-driven guidance and gain peace of mind through instant answers.
 
-<img width="359" height="750" alt="image" src="https://github.com/user-attachments/assets/87163fe4-7fb0-4eea-be53-33fcb40ed10e" />
+<div align="center">
+<img width="200" height="400" alt="image" src="https://github.com/user-attachments/assets/87163fe4-7fb0-4eea-be53-33fcb40ed10e" />
+</div>
 
 ---
 
@@ -96,7 +98,9 @@ Empathetic conversation that feels human, structured data collection (age, gende
 
 Viscura employs a LangGraph-based supervisor-agent architecture that orchestrates multiple specialized AI agents. The Supervisor Agent interacts with users, assigns specialized agents (Skin or Oral) based on symptoms, the Vision Agent validates uploaded images and routes to the correct CV model, Skin/Oral CV Models analyze images and provide disease predictions, and the Reporting Agent generates comprehensive medical reports. All data is stored in Firebase.
 
-<img src="https://github.com/user-attachments/assets/a611df53-d1fe-4c9e-a59b-05c018c9b8e7" width="800" alt="Architecture" />
+<div align="center">
+<img src="https://github.com/user-attachments/assets/a611df53-d1fe-4c9e-a59b-05c018c9b8e7" width="900" height="400" alt="Architecture" />
+</div>
 
 ### 2. Vision Intelligence
 
@@ -104,7 +108,9 @@ Specialized medical-grade vision models trained on curated dermatology and oral 
 
 The process flow includes image upload from smartphone, quality validation using Gemini Vision, content matching to ensure image matches reported condition type, disease classification by custom CV models, confidence scoring, and expert validation.
 
-<img width="1108" height="502" alt="image" src="https://github.com/user-attachments/assets/988fbc7c-ad3e-4e65-bee1-061182016dfd" />
+<div align="center">
+<img width="900" height="400" alt="image" src="https://github.com/user-attachments/assets/988fbc7c-ad3e-4e65-bee1-061182016dfd" />
+</div>
 
 ### 3. Smart Care Navigation
 
@@ -112,7 +118,9 @@ Location-based specialist recommendations integrated with real-time mapping. Use
 
 No more guessing which doctor to see—Viscura routes you directly to specialists who can treat your specific condition.
 
-<img width="301" height="593" alt="image" src="https://github.com/user-attachments/assets/be10d351-0629-49e9-9de6-2ec77ba02aad" /> <img width="282" height="589" alt="image" src="https://github.com/user-attachments/assets/5ea6abd9-1b16-4f01-8171-17acc7b4f177" />
+<div align="center">
+<img width="200" height="400" alt="image" src="https://github.com/user-attachments/assets/be10d351-0629-49e9-9de6-2ec77ba02aad" /> <img width="200" height="400" alt="image" src="https://github.com/user-attachments/assets/5ea6abd9-1b16-4f01-8171-17acc7b4f177" />
+</div>
 
 ---
 
