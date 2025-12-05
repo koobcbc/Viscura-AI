@@ -3,6 +3,7 @@ import {
   View, Text, TextInput, FlatList, StyleSheet,
   KeyboardAvoidingView, Platform, Image, TouchableOpacity, Animated, Dimensions, ActionSheetIOS, Alert, TouchableWithoutFeedback, Keyboard, ScrollView, Modal
 } from 'react-native';
+import { BlurView } from 'expo-blur';
 import * as ImagePicker from 'expo-image-picker';
 import { collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, updateDoc, deleteDoc, doc, Timestamp, getDoc } from 'firebase/firestore';
 import { db, auth, storage } from '../../../firebaseConfig';
@@ -38,7 +39,8 @@ type Summary = {
   causes: string[];
   treatments: string[];
   specialty: string;
-}
+  severity?: string;
+};
 
 export default function ChatScreen({ chatId }: { chatId: string }) {
   const [drawerVisible, setDrawerVisible] = useState(false);
@@ -53,20 +55,23 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
   const scrollOffset = useRef(0);
   const contentHeight = useRef(0);
   const listHeight = useRef(0);
+  const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [settingsVisible, setSettingsVisible] = useState(false);
   const settingsSlideAnim = useRef(new Animated.Value(300)).current;
   const [chatTitle, setChatTitle] = useState('Chat');
-  const [chatCategory, setChatCategory] = useState<'skin' | 'dental' | null>(null);
+  const [chatCategory, setChatCategory] = useState<'skin' | 'oral' | null>(null);
   const [newTitle, setNewTitle] = useState('');
   const [summary, setSummary] = useState<Summary>({
     diagnosis: "Not enough information",
     symptoms: [],
     causes: [],
     treatments: [],
-    specialty: ""
+    specialty: "",
+    severity: undefined
   });
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [isTitleManuallyChanged, setIsTitleManuallyChanged] = useState(false);
+  const [revealedImages, setRevealedImages] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     const keyboardDidShowListener = Keyboard.addListener('keyboardDidShow', () => {
@@ -144,13 +149,24 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
   }, [chatId]);
 
   // Scroll to bottom when component mounts or messages change
+  // But skip if we just uploaded an image (handled separately)
   useEffect(() => {
     if (messages.length > 0) {
+      // Clear any existing timeout
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current);
+      }
       // Small delay to ensure FlatList is rendered
-      setTimeout(() => {
+      scrollTimeoutRef.current = setTimeout(() => {
         flatListRef.current?.scrollToEnd({ animated: true });
       }, 300);
     }
+    
+    return () => {
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current);
+      }
+    };
   }, [messages.length]);
 
   useEffect(() => {
@@ -177,6 +193,7 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
             causes: data.summary.causes || [],
             treatments: data.summary.treatments || [],
             specialty: data.summary.specialty || "",
+            severity: data.summary.severity || data.metadata?.report?.severity_level || undefined,
           };
           
           // Only set summary if we don't already have a valid one (avoid overwriting newly generated summaries)
@@ -210,11 +227,7 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
     return () => unsubscribe();
   }, [chatId]);
 
-  useEffect(() => {
-    if (flatListRef.current) {
-      flatListRef.current.scrollToEnd({ animated: true });
-    }
-  }, [messages])
+  // Removed duplicate scroll handler - handled by messages.length effect above
 
   // Debounce summary generation to prevent infinite loops
   const summaryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -299,6 +312,7 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
           causes: summaryToSave.causes,
           treatments: summaryToSave.treatments,
           specialty: summaryToSave.specialty,
+          severity: summaryToSave.severity,
         },
         summaryUpdatedAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
@@ -635,9 +649,18 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
       // Add optimistic message immediately
       setMessages(prev => [...prev, optimisticUserMessage]);
       
-      // Scroll to bottom to show the new message
-      setTimeout(() => {
-        flatListRef.current?.scrollToEnd({ animated: true });
+      // Scroll to bottom after image has time to load and render
+      // Clear any existing scroll timeout
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current);
+      }
+      // Use multiple timeouts to ensure we scroll after image loads
+      scrollTimeoutRef.current = setTimeout(() => {
+        flatListRef.current?.scrollToEnd({ animated: false });
+        // Second scroll after a bit more time to account for image rendering
+        setTimeout(() => {
+          flatListRef.current?.scrollToEnd({ animated: true });
+        }, 200);
       }, 100);
   
       // Update chat timestamp
@@ -699,7 +722,7 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
               !isNoSummary && (
                 <Text style={styles.cardText}>
                   {isSummary 
-                    ? 'AI-generated summary of your recent chat.'
+                    ? 'Summary of your recent chat.'
                     : 'Find nearby providers for follow-up care.'}
                 </Text>
               )
@@ -739,10 +762,10 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
     },
     heading1: {
       fontSize: 22,
-      fontWeight: 'bold',
+      fontWeight: 'bold' as 'bold',
     },
     // add more if needed
-  };
+  } as any;
 
   const openSettingsDrawer = () => {
     setSettingsVisible(true);
@@ -870,16 +893,20 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
       } else if (report.speciality) {
         // Fallback to speciality field
         specialty = report.speciality === 'skin' ? 'Dermatology' : 
-                   report.speciality === 'dental' ? 'Dental' : 
+                   report.speciality === 'oral' ? 'Dental' : 
                    report.speciality;
       }
+      
+      // Extract severity from metadata.report.severity_level
+      const severity = metadata.report?.severity_level || report.severity_level || undefined;
       
       const extractedSummary: Summary = {
         diagnosis,
         symptoms,
         causes,
         treatments,
-        specialty
+        specialty,
+        severity
       };
       
       console.log('✅ Summary extracted from report:', JSON.stringify(extractedSummary, null, 2));
@@ -910,8 +937,13 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
           onPress: async () => {
             try {
               await deleteDoc(doc(db, "chats", chatId));
-              // Dashboard redirects to category-selection, so navigate there directly
-              router.replace('/category-selection');
+              // Navigate back to dashboard with the chat's category
+              // Map 'oral' back to 'dental' for dashboard route
+              let category = chatCategory || 'skin'; // Default to skin if category not set
+              if (category === 'oral') {
+                category = 'dental';
+              }
+              router.replace(`/dashboard?category=${category}`);
             } catch (error) {
               Alert.alert("Error", "Could not delete chat.");
             }
@@ -1041,8 +1073,13 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
               <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
               <View style={styles.header}>
                 <TouchableOpacity onPress={() => {
-                  // Dashboard redirects to category-selection, so navigate there directly
-                  router.replace('/category-selection');
+                  // Navigate back to dashboard with the chat's category
+                  // Map 'oral' back to 'dental' for dashboard route
+                  let category = chatCategory || 'skin'; // Default to skin if category not set
+                  if (category === 'oral') {
+                    category = 'dental';
+                  }
+                  router.replace(`/dashboard?category=${category}`);
                 }}>
                   <Ionicons name="chevron-back" size={28} color="#000" />
                 </TouchableOpacity>
@@ -1089,7 +1126,34 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
                       {item.sender === 'bot' && (
                         <Text style={styles.sender}>Viscura</Text>
                       )}
-                      {item.image && <Image source={{ uri: item.image }} style={styles.imagePreview} />}
+                      {item.image && (
+                        <View style={styles.imageContainer}>
+                          <Image 
+                            source={{ uri: item.image }} 
+                            style={styles.imagePreview}
+                            onLoad={() => {
+                              // Scroll to bottom after image loads
+                              setTimeout(() => {
+                                flatListRef.current?.scrollToEnd({ animated: true });
+                              }, 100);
+                            }}
+                          />
+                          {!revealedImages.has(item.id) && (
+                            <BlurView intensity={15} tint="light" style={styles.imageBlurOverlay}>
+                              <TouchableOpacity 
+                                style={styles.showImageButton}
+                                onPress={() => {
+                                  setRevealedImages(prev => new Set(prev).add(item.id));
+                                }}
+                                activeOpacity={0.7}
+                              >
+                                <Ionicons name="eye" size={20} color="#000" />
+                                <Text style={styles.showImageButtonText}>Show Image</Text>
+                              </TouchableOpacity>
+                            </BlurView>
+                          )}
+                        </View>
+                      )}
                       {item.text && item.text.trim() && (
                       <Markdown style={markdownStyles}>{item.text}</Markdown>
                       )}
@@ -1097,7 +1161,14 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
                   </View>
                 )}
                 onContentSizeChange={() => {
-                  flatListRef.current?.scrollToEnd({ animated: false });
+                  // Debounce scroll to prevent multiple rapid scrolls
+                  // This is especially important when images are loading
+                  if (scrollTimeoutRef.current) {
+                    clearTimeout(scrollTimeoutRef.current);
+                  }
+                  scrollTimeoutRef.current = setTimeout(() => {
+                    flatListRef.current?.scrollToEnd({ animated: false });
+                  }, 50);
                 }}
                 onLayout={(event) => {
                   listHeight.current = event.nativeEvent.layout.height;
@@ -1149,7 +1220,7 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
 
                 <View style={{ flex: 1 }}>
                   {renderExpandableCard('Summary', 'summary', () => <SummaryScreen summary={summary} />)}
-                  {renderExpandableCard('Doctors Near Me', 'doctors', () => <DoctorsScreen summary={summary} chatCategory={chatCategory} />)}
+                  {renderExpandableCard('Doctors Near Me', 'doctors', () => <DoctorsScreen summary={summary} chatCategory={chatCategory === 'oral' ? 'dental' : (chatCategory === 'skin' ? 'skin' : null)} />)}
                   {/* <TouchableOpacity style={styles.leaveButton} onPress={() => {}}>
                     <Text style={styles.leaveButtonText}>Leave Chat</Text>
                   </TouchableOpacity> */}
@@ -1281,12 +1352,40 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     color: '#000'
   },
+  imageContainer: {
+    position: 'relative',
+    marginTop: 6,
+    marginBottom: 4,
+  },
   imagePreview: {
     width: 200,
     height: 200,
     borderRadius: 12,
-    marginTop: 6,
-    marginBottom: 4
+  },
+  imageBlurOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    overflow: 'hidden',
+  },
+  showImageButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'transparent',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    gap: 8,
+  },
+  showImageButtonText: {
+    color: '#000',
+    fontSize: 16,
+    fontWeight: '600',
   },
   iconButton: {
     paddingHorizontal: 10,
@@ -1450,17 +1549,6 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 8,
     alignItems: 'center',
-  },
-  titleInput: {
-    paddingHorizontal: 4,
-    paddingVertical: 2,
-    borderBottomWidth: 1,
-    borderColor: '#aaa',
-    fontSize: 18,
-    fontWeight: 'bold',
-    minWidth: 100,
-    maxWidth: 200,
-    color: '#000',
   },
   modalOverlay: {
     flex: 1,

@@ -9,6 +9,7 @@ import * as FileSystem from 'expo-file-system';
 import { Ionicons } from '@expo/vector-icons';
 import taxonomy from '../../../assets/nucc_taxonomy_250.json';
 import cachedDoctors60611Dermatology from '../../../assets/doctors_cache_60611_dermatology.json';
+import cachedDoctors60611Dentist from '../../../assets/doctors_cache_60611_dentist.json';
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import Constants from 'expo-constants';
 import DropDownPicker from 'react-native-dropdown-picker';
@@ -16,7 +17,25 @@ import { doc, updateDoc, getDoc } from 'firebase/firestore';
 import { auth, db } from '../../../firebaseConfig'; // adjust path as needed
 
 
-const STATE = 'IL';
+// Helper function to get state from zipcode
+const getStateFromZipcode = async (zipcode: string): Promise<string> => {
+  try {
+    const geoResults = await Location.geocodeAsync(zipcode);
+    if (geoResults.length > 0) {
+      const reverse = await Location.reverseGeocodeAsync({
+        latitude: geoResults[0].latitude,
+        longitude: geoResults[0].longitude
+      });
+      if (reverse[0]?.region) {
+        return reverse[0].region; // region is the state abbreviation (e.g., "IL")
+      }
+    }
+  } catch (error) {
+    console.warn(`Failed to get state from zipcode ${zipcode}:`, error);
+  }
+  // Fallback to IL if we can't determine state
+  return 'IL';
+};
 
 // Enable fast loading for demo (uses cached data for 60611 zip code and Dermatology)
 const ENABLE_FAST_LOADING = true;
@@ -80,14 +99,18 @@ export default function DoctorsScreen({ summary, chatCategory }: { summary: Summ
   const [selectedSpecialty, setSelectedSpecialty] = useState(() => {
     // If summary has a specialty, use it; otherwise use chat category default
     if (summary.specialty) {
-      return summary.specialty;
+      if (summary.specialty.toLowerCase().includes('oral')) {
+        return "Dentist";
+      } else {
+        return summary.specialty;
+      }
     }
     
     // Set default based on chat category
     if (chatCategory === 'skin') {
       return 'Dermatology';
     } else if (chatCategory === 'dental') {
-      return 'General Practice';
+      return 'Dentist';
     }
     
     return '';
@@ -120,6 +143,26 @@ export default function DoctorsScreen({ summary, chatCategory }: { summary: Summ
     const tree = buildNestedSpecialties(taxonomy);
     setNestedSpecialties(tree);
     setGroupItems(Object.keys(tree).map(k => ({ label: k, value: k })));
+
+    // If chatCategory is dental, automatically set to Dental Providers > Dentist > Dentist
+    if (chatCategory === 'dental') {
+      // Find the general Dentist entry (where Specialization is empty)
+      const dentalDentist = taxonomy.find(
+        (entry) =>
+          entry["Grouping"] === "Dental Providers" &&
+          entry["Classification"] === "Dentist" &&
+          (entry["Specialization"] === "" || !entry["Specialization"])
+      );
+      
+      if (dentalDentist) {
+        setGroupValue("Dental Providers");
+        setClassValue("Dentist");
+        // Use "Dentist" as specValue even though Specialization is empty in taxonomy
+        setSpecValue("Dentist");
+        setSelectedSpecialty("Dentist");
+        return;
+      }
+    }
 
     // Determine which specialty to use for matching
     const specialtyToMatch = summary.specialty || selectedSpecialty;
@@ -368,9 +411,11 @@ export default function DoctorsScreen({ summary, chatCategory }: { summary: Summ
       let userLat = lat;
       let userLon = lon;
 
-      // Fast loading: Use cached data for demo (regardless of selected specialty)
+      // Fast loading: Use cached data for demo (only for zipcode 60611)
+      // If zipcode changes to something else, it will fall through to normal API fetching
+      // If specialty changes, it will use the appropriate cache (dentist vs dermatology)
       if (ENABLE_FAST_LOADING && zip === '60611') {
-        console.log('🚀 Using cached data for fast loading (60611, any specialty)');
+        console.log(`🚀 Using cached data for fast loading (zip: ${zip}, specialty: ${selected || 'default'})`);
         
         // Set city for 60611
         if (!userCity) {
@@ -379,6 +424,7 @@ export default function DoctorsScreen({ summary, chatCategory }: { summary: Summ
         }
         
         // Get user location for distance calculation
+        // Use provided coordinates if available, otherwise geocode the zipcode
         if (!userLat || !userLon) {
           if (zip === '60611') {
             // Approximate coordinates for 60611 (Chicago)
@@ -395,7 +441,16 @@ export default function DoctorsScreen({ summary, chatCategory }: { summary: Summ
         }
 
         // Use cached data and recalculate distances if user location is available
-        const cachedDoctors = (cachedDoctors60611Dermatology as Doctor[]).map(doctor => {
+        // Use dentist cache if specialty is oral/Dental, otherwise use dermatology cache
+        // This handles specialty changes correctly
+        const isOralSpecialty = selected?.toLowerCase().includes('dental') || 
+                                selected?.toLowerCase().includes('oral') ||
+                                chatCategory === 'dental';
+        const cachedDoctorsSource = isOralSpecialty ? cachedDoctors60611Dentist : cachedDoctors60611Dermatology;
+        
+        console.log(`📋 Using ${isOralSpecialty ? 'dentist' : 'dermatology'} cache for specialty: ${selected || 'default'}`);
+        
+        const cachedDoctors = (cachedDoctorsSource as Doctor[]).map(doctor => {
           let distance = doctor.distance;
           if (userLat && userLon && doctor.latitude && doctor.longitude) {
             distance = calculateDistance(userLat, userLon, doctor.latitude, doctor.longitude);
@@ -434,6 +489,11 @@ export default function DoctorsScreen({ summary, chatCategory }: { summary: Summ
         setLoading(false);
         return;
       }
+      
+      // If zipcode is not '60611' or fast loading is disabled, proceed with normal API fetching
+      if (ENABLE_FAST_LOADING && zip && zip !== '60611') {
+        console.log(`📍 Zipcode changed to ${zip}, fetching from API (fast loading only works for 60611)`);
+      }
 
       // If we have location but no city, get city from reverse geocoding
       if ((lat && lon) && !userCity) {
@@ -441,6 +501,24 @@ export default function DoctorsScreen({ summary, chatCategory }: { summary: Summ
         if (geo[0]?.city) {
           userCity = geo[0].city;
           setCity(userCity);
+        }
+      }
+
+      // Get state from zipcode (or use location if available)
+      let state = 'IL'; // Default fallback
+      if (zip) {
+        state = await getStateFromZipcode(zip);
+        console.log(`📍 Determined state "${state}" from zipcode ${zip}`);
+      } else if (userLat && userLon) {
+        // If we have coordinates but no zip, get state from coordinates
+        try {
+          const reverse = await Location.reverseGeocodeAsync({ latitude: userLat, longitude: userLon });
+          if (reverse[0]?.region) {
+            state = reverse[0].region;
+            console.log(`📍 Determined state "${state}" from coordinates`);
+          }
+        } catch (error) {
+          console.warn('Failed to get state from coordinates:', error);
         }
       }
 
@@ -465,7 +543,7 @@ export default function DoctorsScreen({ summary, chatCategory }: { summary: Summ
       // So we'll search by state and filter by city in results
       // Reduced limit to avoid 500 errors
       const buildUrl = (taxonomy: string, proxyIndex = 0) => {
-        const baseUrl = `https://npiregistry.cms.hhs.gov/api/?version=2.1&taxonomy_description=${encodeURIComponent(taxonomy)}&limit=50&state=${STATE}`;
+        const baseUrl = `https://npiregistry.cms.hhs.gov/api/?version=2.1&taxonomy_description=${encodeURIComponent(taxonomy)}&limit=50&state=${state}`;
         
         // Try different CORS proxies if one fails
         const proxies = [
@@ -599,6 +677,7 @@ export default function DoctorsScreen({ summary, chatCategory }: { summary: Summ
 
       // Filter by city if we have a city name (case-insensitive)
       let filteredResults = allResults;
+      
       if (userCity) {
         filteredResults = allResults.filter((doc: any) => {
           const addresses = doc.addresses || [];
@@ -608,14 +687,90 @@ export default function DoctorsScreen({ summary, chatCategory }: { summary: Summ
         });
       }
 
-      if (filteredResults.length === 0) {
-        // If no results for the city, try without city filter
-        if (userCity && allResults.length > 0) {
-          console.warn(`No results found for city "${userCity}", showing results from ${STATE}`);
-          filteredResults = allResults;
-      } else {
-          throw new Error('No results found');
+      if (filteredResults.length === 0 && userCity && allResults.length > 0) {
+        // If no results for the city, try to find nearby cities
+        console.warn(`No results found for city "${userCity}", trying nearby cities...`);
+        
+        // Get unique cities from all results
+        const citiesWithCoords = new Map<string, { lat: number; lon: number }>();
+        
+        // First, try to geocode a few cities to find nearby ones
+        const citySamples = new Set<string>();
+        allResults.forEach((doc: any) => {
+          const addresses = doc.addresses || [];
+          const locationAddress = addresses.find((addr: any) => addr.address_purpose === 'LOCATION') || addresses[0] || {};
+          const docCity = (locationAddress.city || '').trim();
+          if (docCity && docCity.toLowerCase() !== userCity.toLowerCase()) {
+            citySamples.add(docCity);
+          }
+        });
+        
+        // Geocode user's city to get reference point
+        let userCityLat: number | undefined;
+        let userCityLon: number | undefined;
+        if (userLat && userLon) {
+          userCityLat = userLat;
+          userCityLon = userLon;
+        } else {
+          try {
+            const userCityGeo = await Location.geocodeAsync(`${userCity}, ${state}`);
+            if (userCityGeo.length > 0) {
+              userCityLat = userCityGeo[0].latitude;
+              userCityLon = userCityGeo[0].longitude;
+            }
+          } catch (err) {
+            console.warn('Failed to geocode user city:', err);
+          }
         }
+        
+        // If we have user city coordinates, find nearby cities
+        if (userCityLat && userCityLon) {
+          const nearbyCities = new Set<string>();
+          const maxDistance = 20; // miles
+          
+          // Sample up to 20 cities to check distance
+          const citiesToCheck = Array.from(citySamples).slice(0, 20);
+          
+          for (const cityName of citiesToCheck) {
+            try {
+              const cityGeo = await Location.geocodeAsync(`${cityName}, ${state}`);
+              if (cityGeo.length > 0) {
+                const cityLat = cityGeo[0].latitude;
+                const cityLon = cityGeo[0].longitude;
+                const distance = calculateDistance(userCityLat, userCityLon, cityLat, cityLon);
+                
+                if (distance <= maxDistance) {
+                  nearbyCities.add(cityName);
+                  citiesWithCoords.set(cityName, { lat: cityLat, lon: cityLon });
+                }
+              }
+            } catch (err) {
+              // Skip cities that fail to geocode
+              continue;
+            }
+          }
+          
+          // Filter results to nearby cities
+          if (nearbyCities.size > 0) {
+            filteredResults = allResults.filter((doc: any) => {
+              const addresses = doc.addresses || [];
+              const locationAddress = addresses.find((addr: any) => addr.address_purpose === 'LOCATION') || addresses[0] || {};
+              const docCity = (locationAddress.city || '').trim();
+              return nearbyCities.has(docCity);
+            });
+            console.log(`Found ${filteredResults.length} results in ${nearbyCities.size} nearby cities`);
+          }
+        }
+        
+        // If still no results (or couldn't find nearby cities), fall back to all results
+        // They will be sorted by distance later
+        if (filteredResults.length === 0) {
+          const zipDisplay = zip ? `zipcode ${zip} (${state})` : state;
+          console.warn(`No nearby cities found, showing closest results from ${zipDisplay} (sorted by distance)`);
+          filteredResults = allResults;
+        }
+      } else if (filteredResults.length === 0) {
+        console.warn(`No results found`);
       }
 
       // Helper function to find the best matching taxonomy
@@ -655,7 +810,7 @@ export default function DoctorsScreen({ summary, chatCategory }: { summary: Summ
       });
 
       if (doctorsWithValidTaxonomy.length === 0) {
-        throw new Error('No doctors found with matching specialties');
+        console.warn('No doctors found with matching specialties');
       }
 
       // Helper function to geocode with retry and rate limiting

@@ -7,6 +7,7 @@ type Summary = {
   causes: string[];
   treatments: string[];
   specialty: string;
+  severity?: string;
 };
 
 export default function SummaryScreen({ summary }: { summary: Summary }) {
@@ -33,8 +34,33 @@ export default function SummaryScreen({ summary }: { summary: Summary }) {
 
   const diagnosisList = getDiagnosisList();
 
+  // Get severity color based on level
+  const getSeverityColor = (severity?: string) => {
+    if (!severity) return '#7f8c8d';
+    const lowerSeverity = severity.toLowerCase();
+    if (lowerSeverity.includes('high') || lowerSeverity.includes('severe') || lowerSeverity.includes('critical')) {
+      return '#e74c3c'; // Red
+    } else if (lowerSeverity.includes('medium') || lowerSeverity.includes('moderate')) {
+      return '#f39c12'; // Orange
+    } else if (lowerSeverity.includes('low') || lowerSeverity.includes('mild')) {
+      return '#27ae60'; // Green
+    }
+    return '#3498db'; // Blue (default)
+  };
+
   return (
     <ScrollView style={styles.container}>
+      {summary.severity && (
+        <View style={styles.row}>
+          <Text style={styles.heading}>Severity</Text>
+          <View style={[styles.severityBadge, { backgroundColor: getSeverityColor(summary.severity) + '20', borderColor: getSeverityColor(summary.severity) }]}>
+            <Text style={[styles.severityText, { color: getSeverityColor(summary.severity) }]}>
+              {summary.severity}
+            </Text>
+          </View>
+        </View>
+      )}
+      
       <View style={styles.row}>
         <Text style={styles.heading}>Diagnosis</Text>
         {diagnosisList.length > 0 ? (
@@ -90,5 +116,18 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#2c3e50',
     fontWeight: '500',
+  },
+  severityBadge: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 2,
+    alignSelf: 'flex-start',
+    marginTop: 4,
+  },
+  severityText: {
+    fontSize: 15,
+    fontWeight: '700',
+    textTransform: 'capitalize',
   },
 });

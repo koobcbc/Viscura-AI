@@ -64,10 +64,13 @@ export default function Dashboard() {
     };
     fetchUserName();
 
+    // Map "dental" to "oral" for backend compatibility
+    const firestoreCategory = category === 'dental' ? 'oral' : category;
+    
     const q = query(
       collection(db, "chats"),
       where("userId", "==", user.uid),
-      where("category", "==", category),
+      where("category", "==", firestoreCategory),
       orderBy("last_message_at", "desc")
     );
 
@@ -96,10 +99,13 @@ export default function Dashboard() {
       const user = auth.currentUser;
       if (!user) throw new Error("User not authenticated.");
 
+      // Map "dental" to "oral" for backend compatibility
+      const firestoreCategory = category === 'dental' ? 'oral' : category;
+      
       const docRef = await addDoc(collection(db, "chats"), {
         title: "New Chat",
         userId: user.uid,
-        category: category,
+        category: firestoreCategory,
         createdAt: serverTimestamp(),
         last_message_at: serverTimestamp(),
       });
