@@ -81,7 +81,7 @@ type Summary = {
   specialty: string;
 };
 
-export default function DoctorsScreen({ summary, chatCategory }: { summary: Summary; chatCategory?: 'skin' | 'dental' | null }) {
+export default function DoctorsScreen({ summary, chatCategory }: { summary: Summary; chatCategory?: 'skin' | 'oral' | null }) {
   const [doctors, setDoctors] = useState<Doctor[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -109,7 +109,7 @@ export default function DoctorsScreen({ summary, chatCategory }: { summary: Summ
     // Set default based on chat category
     if (chatCategory === 'skin') {
       return 'Dermatology';
-    } else if (chatCategory === 'dental') {
+    } else if (chatCategory === 'oral') {
       return 'Dentist';
     }
     
@@ -144,8 +144,8 @@ export default function DoctorsScreen({ summary, chatCategory }: { summary: Summ
     setNestedSpecialties(tree);
     setGroupItems(Object.keys(tree).map(k => ({ label: k, value: k })));
 
-    // If chatCategory is dental, automatically set to Dental Providers > Dentist > Dentist
-    if (chatCategory === 'dental') {
+    // If chatCategory is oral, automatically set to Dental Providers > Dentist > Dentist
+    if (chatCategory === 'oral') {
       // Find the general Dentist entry (where Specialization is empty)
       const dentalDentist = taxonomy.find(
         (entry) =>
@@ -445,7 +445,7 @@ export default function DoctorsScreen({ summary, chatCategory }: { summary: Summ
         // This handles specialty changes correctly
         const isOralSpecialty = selected?.toLowerCase().includes('dental') || 
                                 selected?.toLowerCase().includes('oral') ||
-                                chatCategory === 'dental';
+                                chatCategory === 'oral';
         const cachedDoctorsSource = isOralSpecialty ? cachedDoctors60611Dentist : cachedDoctors60611Dermatology;
         
         console.log(`📋 Using ${isOralSpecialty ? 'dentist' : 'dermatology'} cache for specialty: ${selected || 'default'}`);

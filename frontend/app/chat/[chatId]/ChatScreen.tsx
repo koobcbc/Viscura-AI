@@ -939,10 +939,7 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
               await deleteDoc(doc(db, "chats", chatId));
               // Navigate back to dashboard with the chat's category
               // Map 'oral' back to 'dental' for dashboard route
-              let category = chatCategory || 'skin'; // Default to skin if category not set
-              if (category === 'oral') {
-                category = 'dental';
-              }
+              let category: 'skin' | 'dental' = (chatCategory === 'oral' ? 'dental' : (chatCategory || 'skin')) as 'skin' | 'dental';
               router.replace(`/dashboard?category=${category}`);
             } catch (error) {
               Alert.alert("Error", "Could not delete chat.");
@@ -1075,10 +1072,7 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
                 <TouchableOpacity onPress={() => {
                   // Navigate back to dashboard with the chat's category
                   // Map 'oral' back to 'dental' for dashboard route
-                  let category = chatCategory || 'skin'; // Default to skin if category not set
-                  if (category === 'oral') {
-                    category = 'dental';
-                  }
+                  let category: 'skin' | 'dental' = (chatCategory === 'oral' ? 'dental' : (chatCategory || 'skin')) as 'skin' | 'dental';
                   router.replace(`/dashboard?category=${category}`);
                 }}>
                   <Ionicons name="chevron-back" size={28} color="#000" />
@@ -1220,7 +1214,7 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
 
                 <View style={{ flex: 1 }}>
                   {renderExpandableCard('Summary', 'summary', () => <SummaryScreen summary={summary} />)}
-                  {renderExpandableCard('Doctors Near Me', 'doctors', () => <DoctorsScreen summary={summary} chatCategory={chatCategory === 'oral' ? 'dental' : (chatCategory === 'skin' ? 'skin' : null)} />)}
+                  {renderExpandableCard('Doctors Near Me', 'doctors', () => <DoctorsScreen summary={summary} chatCategory={chatCategory} />)}
                   {/* <TouchableOpacity style={styles.leaveButton} onPress={() => {}}>
                     <Text style={styles.leaveButtonText}>Leave Chat</Text>
                   </TouchableOpacity> */}
