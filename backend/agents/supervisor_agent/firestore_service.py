@@ -6,6 +6,7 @@ Handles Supervisor Agent persistence:
 - Store/retrieve messages
 - Save Vision results
 - Save final reports
+- Manage conversation history for multi-turn chats
 - Generate signed URLs for images stored in Firebase Storage
 """
 
@@ -58,7 +59,7 @@ class FirestoreService:
         self.bucket = get_storage().bucket(self.bucket_name) if self.bucket_name else None
 
     # =====================================================
-    # 🔹 Chat Messages
+    # 🔹 Chat Messages (Individual Message Logging)
     # =====================================================
     def save_message(self, chat_id: str, message: Dict[str, Any]) -> bool:
         """
@@ -83,8 +84,11 @@ class FirestoreService:
 
     def get_chat_history(self, chat_id: str, limit: int = 50) -> List[Dict[str, Any]]:
         """
-        Fetch chat history for the given chat_id.
+        Fetch chat history for the given chat_id from messages subcollection.
         Returns a list of message dicts ordered by timestamp ascending.
+        
+        Note: This retrieves the full message log. For conversation history 
+        in role/content format, use get_conversation_history().
         """
         try:
             messages_ref = (
@@ -104,6 +108,129 @@ class FirestoreService:
         except Exception as e:
             print(f"🔥 Firestore get_chat_history error: {e}")
             return []
+
+    # =====================================================
+    # 🔹 Conversation History (Multi-turn Chat State)
+    # =====================================================
+    def get_conversation_history(self, chat_id: str) -> List[Dict[str, str]]:
+        """
+        Retrieve conversation history for a given chat_id.
+        This stores the conversation in role/content format for agent context.
+        
+        Args:
+            chat_id: The chat identifier
+            
+        Returns:
+            List of message dictionaries with 'role' and 'content' keys
+            Returns empty list if no history found or on error
+            
+        Example return:
+            [
+                {"role": "user", "content": "Hi I have a rash"},
+                {"role": "assistant", "content": "I can help with that..."},
+            ]
+        """
+        try:
+            chat_doc_ref = self.db.collection(FIRESTORE_COLLECTION).document(chat_id)
+            chat_doc = chat_doc_ref.get()
+            
+            if chat_doc.exists:
+                chat_data = chat_doc.to_dict()
+                history = chat_data.get("chat_history", [])
+                print(f"✅ Retrieved {len(history)} messages from Firestore for chat {chat_id}")
+                return history
+            else:
+                print(f"ℹ️  No chat document found for chat_id: {chat_id}")
+                return []
+                
+        except Exception as e:
+            print(f"❌ Error retrieving conversation history for {chat_id}: {e}")
+            return []
+    
+    def save_conversation_history(self, chat_id: str, history: List[Dict[str, str]]) -> bool:
+        """
+        Save conversation history to Firestore.
+        
+        Args:
+            chat_id: The chat identifier
+            history: List of message dictionaries with 'role' and 'content' keys
+            
+        Returns:
+            True if successful, False otherwise
+            
+        Example history format:
+            [
+                {"role": "user", "content": "Hi I have a rash"},
+                {"role": "assistant", "content": "I can help with that..."},
+            ]
+        """
+        try:
+            chat_doc_ref = self.db.collection(FIRESTORE_COLLECTION).document(chat_id)
+            chat_doc_ref.set(
+                {
+                    "chat_history": history,
+                    "updated_at": firestore.SERVER_TIMESTAMP
+                },
+                merge=True
+            )
+            print(f"✅ Saved {len(history)} messages to Firestore for chat {chat_id}")
+            return True
+            
+        except Exception as e:
+            print(f"❌ Error saving conversation history for {chat_id}: {e}")
+            return False
+    
+    def append_to_conversation_history(self, chat_id: str, role: str, content: str) -> bool:
+        """
+        Append a single message to existing conversation history.
+        
+        Args:
+            chat_id: The chat identifier
+            role: Message role ('user', 'assistant', or 'system')
+            content: Message content
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            # Get existing history
+            history = self.get_conversation_history(chat_id)
+            
+            # Append new message
+            history.append({"role": role, "content": content})
+            
+            # Save back
+            return self.save_conversation_history(chat_id, history)
+            
+        except Exception as e:
+            print(f"❌ Error appending to conversation history for {chat_id}: {e}")
+            return False
+    
+    def clear_conversation_history(self, chat_id: str) -> bool:
+        """
+        Clear conversation history for a given chat_id.
+        
+        Args:
+            chat_id: The chat identifier
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            chat_doc_ref = self.db.collection(FIRESTORE_COLLECTION).document(chat_id)
+            chat_doc_ref.set(
+                {
+                    "chat_history": [],
+                    "updated_at": firestore.SERVER_TIMESTAMP
+                },
+                merge=True
+            )
+            print(f"✅ Cleared conversation history for chat {chat_id}")
+            return True
+            
+        except Exception as e:
+            print(f"❌ Error clearing conversation history for {chat_id}: {e}")
+            return False
 
     # =====================================================
     # 🔹 Vision Agent Results

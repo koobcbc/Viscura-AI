@@ -107,6 +107,72 @@ guardrails = SecurityOrchestrator(enabled=ENABLE_SECURITY)
 http = HttpClient(timeout=25, retries=2)
 db = FirestoreService()
 
+@app.get("/api/v1/chat/{chat_id}/history")
+async def get_chat_history_endpoint(chat_id: str):
+    """
+    Retrieve conversation history for a given chat_id.
+    Returns the history in role/content format.
+    """
+    try:
+        history = db.get_conversation_history(chat_id)
+        return {
+            "success": True,
+            "chat_id": chat_id,
+            "history": history,
+            "count": len(history)
+        }
+    except Exception as e:
+        raise HTTPException(500, f"Failed to retrieve history: {str(e)}")
+
+
+@app.delete("/api/v1/chat/{chat_id}/history")
+async def clear_chat_history_endpoint(chat_id: str):
+    """
+    Clear conversation history for a given chat_id.
+    Useful for starting a fresh conversation.
+    """
+    try:
+        success = db.clear_conversation_history(chat_id)
+        if success:
+            return {
+                "success": True,
+                "message": f"Conversation history cleared for chat {chat_id}"
+            }
+        else:
+            raise HTTPException(500, "Failed to clear history")
+    except Exception as e:
+        raise HTTPException(500, f"Failed to clear history: {str(e)}")
+
+
+@app.post("/api/v1/chat/{chat_id}/history")
+async def save_chat_history_endpoint(chat_id: str, payload: Dict[str, Any]):
+    """
+    Manually save/update conversation history for a given chat_id.
+    Payload should contain: {"history": [{"role": "user", "content": "..."}]}
+    """
+    try:
+        history = payload.get("history", [])
+        if not isinstance(history, list):
+            raise HTTPException(400, "history must be a list")
+        
+        # Validate history format
+        for msg in history:
+            if not isinstance(msg, dict) or "role" not in msg or "content" not in msg:
+                raise HTTPException(400, "Each message must have 'role' and 'content' fields")
+        
+        success = db.save_conversation_history(chat_id, history)
+        if success:
+            return {
+                "success": True,
+                "message": f"Saved {len(history)} messages for chat {chat_id}",
+                "count": len(history)
+            }
+        else:
+            raise HTTPException(500, "Failed to save history")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Failed to save history: {str(e)}")
 
 @app.get("/health")
 async def health(): return {"status": "ok"}
@@ -150,17 +216,27 @@ async def _route_text(req: SupervisorRequest) -> AgentResponse:
     Ensures payload matches the expected format of the downstream /chat API.
     """
     print("🔍 Request:", req, flush=True)
+    
     agent_url = (
         SKIN_AGENT_URL if req.speciality == "skin" else ORAL_AGENT_URL
     )
+    
+    # ✅ RETRIEVE HISTORY FROM FIRESTORE IF NOT PROVIDED
+    if not req.history:
+        stored_history = db.get_conversation_history(req.chat_id)
+        if stored_history:
+            try:
+                req.history = [MessageTurn(**msg) for msg in stored_history]
+                print(f"✅ Loaded {len(req.history)} messages from Firestore")
+            except Exception as e:
+                print(f"⚠️  Error parsing stored history: {e}")
+                req.history = []
+    
     # 🧩 Build chat history cleanly for multi-turn flow
-    chat_history = [ {"role": h.role, "content": h.content} for h in req.history ]
-
-    # Only append current message if it's not already the last message in history
-    # (prevents duplication since the agent will also add it)
-    last_message_in_history = chat_history[-1] if chat_history else None
-    if not last_message_in_history or last_message_in_history.get("content") != req.message:
-        chat_history.append({"role": "user", "content": req.message})
+    chat_history = [{"role": h.role, "content": h.content} for h in req.history]
+    
+    if len(chat_history) == 0:
+        chat_history = [{"role": "AI Bot", "content": "Hi There! How can I assist you today?"}]
     
     print("🧾 Full chat history being sent:", chat_history, flush=True)
     payload = {"thread_id": req.chat_id, "message": req.message, "chat_history": chat_history}
@@ -171,18 +247,24 @@ async def _route_text(req: SupervisorRequest) -> AgentResponse:
     try:
         # Post JSON (httpx must use json=data)
         data = await http.post_json(agent_url, payload)
-        # print("🔍 Agent response:", data)
+        
+        # ✅ Build updated history to persist and return
+        updated_history = list(req.history)  # Copy existing history
+        
         if req.message:
-            req.history.append(MessageTurn(role="user", content=req.message))
+            updated_history.append(MessageTurn(role="user", content=req.message))
 
         if data.get("response"):
-            # print("🔍 Adding assistant response to history:", data["response"])
-            req.history.append(MessageTurn(role="assistant", content=data["response"]))
-            # print("🔍 History after adding assistant response:", req.history)
+            updated_history.append(MessageTurn(role="assistant", content=data["response"]))
+            print(f"✅ Updated history length: {len(updated_history)}")
         else:
             print("❌ No response from agent")
 
-                # ✅ Expected fields from agent response
+        # ✅ SAVE UPDATED HISTORY TO FIRESTORE
+        history_dicts = [h.model_dump() for h in updated_history]
+        db.save_conversation_history(req.chat_id, history_dicts)
+        
+        # ✅ Expected fields from agent response
         msg = data.get("response", "")
         should_request_image = data.get("should_request_image", False)
         collected_info = data.get("collected_info", {})
@@ -200,7 +282,7 @@ async def _route_text(req: SupervisorRequest) -> AgentResponse:
         
         meta = {
             "thread_id": data.get("thread_id"),
-            "chat_history": data.get("chat_history", []),
+            "chat_history": history_dicts,  # ✅ Return updated history to client
             "information_complete": data.get("information_complete", False),
             "should_request_image": should_request_image,
             "ready_for_images": should_request_image,
@@ -218,9 +300,19 @@ async def _route_text(req: SupervisorRequest) -> AgentResponse:
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Downstream {agent_url} error: {e}")
 
-
 async def _route_image_then_report(req: SupervisorRequest) -> AgentResponse:
     """Send image to Vision Agent, then Reporting Agent."""
+    
+    # ✅ RETRIEVE HISTORY FROM FIRESTORE IF NOT PROVIDED
+    if not req.history:
+        stored_history = db.get_conversation_history(req.chat_id)
+        if stored_history:
+            try:
+                req.history = [MessageTurn(**msg) for msg in stored_history]
+                print(f"✅ Loaded {len(req.history)} messages from Firestore for image processing")
+            except Exception as e:
+                print(f"⚠️  Error parsing stored history: {e}")
+                req.history = []
     
     # Vision Agent - send with image_url
     vision_payload = {
@@ -247,10 +339,10 @@ async def _route_image_then_report(req: SupervisorRequest) -> AgentResponse:
             "invalid_image",
             {
                 "validation_reason": validation_reason,
-                "error_type": "image_validation_failed"
+                "error_type": "image_validation_failed",
+                "chat_history": [h.model_dump() for h in req.history],  # Return history even on error
             }
         )
-        await _log_bot_message(req, response)
         return response
     
     # Image is valid - extract prediction result
@@ -261,7 +353,7 @@ async def _route_image_then_report(req: SupervisorRequest) -> AgentResponse:
     # Extract diagnosis from prediction_result
     # prediction_result has: {"confidence": float, "predicted_class": str}
     diagnosis = {
-        "diagnosis_name": prediction_result.get("predicted_class", "Unknown"),
+        "diagnosis_name": prediction_result.get("prediction", "Unknown"),
         "confidence": prediction_result.get("confidence", 0.0),
     }
 
@@ -271,7 +363,7 @@ async def _route_image_then_report(req: SupervisorRequest) -> AgentResponse:
         "confidence": diagnosis["confidence"],
     })
     
-        # Get collected_info from Firestore (saved during text conversations)
+    # Get collected_info from Firestore (saved during text conversations)
     collected_info = {}
     try:
         chat_doc_ref = db.db.collection("chats").document(req.chat_id)
@@ -309,6 +401,15 @@ async def _route_image_then_report(req: SupervisorRequest) -> AgentResponse:
     # Extract the main output message (this is the user-friendly message from the report)
     report_output = report_data.get("output") or "Your report is ready."
     
+    # ✅ Update history with image submission and report
+    updated_history = list(req.history)
+    updated_history.append(MessageTurn(role="user", content="[Image submitted for analysis]"))
+    updated_history.append(MessageTurn(role="assistant", content=report_output))
+    
+    # ✅ SAVE UPDATED HISTORY TO FIRESTORE
+    history_dicts = [h.model_dump() for h in updated_history]
+    db.save_conversation_history(req.chat_id, history_dicts)
+    
     # Build metadata with the complete report structure
     meta = {
         "diagnosis": diagnosis_from_report,
@@ -321,6 +422,7 @@ async def _route_image_then_report(req: SupervisorRequest) -> AgentResponse:
         "message_state": "COMPLETED",
         "ready_for_images": False,
         "validation_reason": validation_reason,
+        "chat_history": history_dicts,  # ✅ Return updated history to client
     }
     
     # Use the output field as the main response message
@@ -334,8 +436,6 @@ async def _route_image_then_report(req: SupervisorRequest) -> AgentResponse:
     })
     
     return final
-
-
 # ---------------------------------------------------------------------
 # MAIN ENTRY
 # ---------------------------------------------------------------------
