@@ -101,7 +101,7 @@ export default function Dashboard() {
 
       // Map "dental" to "oral" for backend compatibility
       const firestoreCategory = category === 'dental' ? 'oral' : category;
-      
+
       const docRef = await addDoc(collection(db, "chats"), {
         title: "New Chat",
         userId: user.uid,

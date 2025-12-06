@@ -72,6 +72,7 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [isTitleManuallyChanged, setIsTitleManuallyChanged] = useState(false);
   const [revealedImages, setRevealedImages] = useState<Set<string>>(new Set());
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     const keyboardDidShowListener = Keyboard.addListener('keyboardDidShow', () => {
@@ -216,7 +217,7 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
             updateDoc(chatRef, {
               title: loadedSummary.diagnosis,
             }).catch(err => {
-              console.error('Error updating chat title:', err);
+              console.warn('Error updating chat title:', err);
             });
             setChatTitle(loadedSummary.diagnosis);
           }
@@ -332,8 +333,8 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
 
       console.log('✅ Summary saved to Firestore successfully');
     } catch (error) {
-      console.error('❌ Error saving summary to Firestore:', error);
-      console.error('❌ Error details:', JSON.stringify(error, null, 2));
+      console.warn('❌ Error saving summary to Firestore:', error);
+      console.warn('❌ Error details:', JSON.stringify(error, null, 2));
       // Don't show alert to user - this is a background operation
     }
   };
@@ -387,8 +388,19 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
   const BACKEND_URL = 'https://supervisor-agent-139431081773.us-central1.run.app/api/v1/main';
 
   async function getGeminiResponse(msg: string, imageUrl?: string) {
+    // Abort any previous pending request
+    if (abortControllerRef.current) {
+      console.log('🛑 Aborting previous request');
+      abortControllerRef.current.abort();
+    }
+
+    // Create new AbortController for this request
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     try {
       if (!auth.currentUser) {
+        abortControllerRef.current = null;
         return "Please sign in to continue.";
       }
 
@@ -429,14 +441,19 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify(requestBody)
+        body: JSON.stringify(requestBody),
+        signal: controller.signal
       });
+      
+      // Clear abort controller on success
+      abortControllerRef.current = null;
 
       console.log('🟢 Backend API Response Status:', response.status, response.statusText);
 
       if (!response.ok) {
+        abortControllerRef.current = null;
         const errorText = await response.text();
-        console.error('🔴 Backend API Error Response:', errorText);
+        console.warn('🔴 Backend API Error Response:', errorText); 
         throw new Error(`Backend API error: ${response.status} - ${errorText}`);
       }
 
@@ -448,7 +465,7 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
         data = JSON.parse(responseText);
         console.log('🟢 Backend API Parsed JSON:', JSON.stringify(data, null, 2));
       } catch (parseError) {
-        console.error('🔴 Backend API Response is not valid JSON:', parseError);
+        console.warn('🔴 Backend API Response is not valid JSON:', parseError);
         console.log('🟡 Returning raw response text');
         return responseText || "Sorry, something went wrong.";
       }
@@ -459,17 +476,53 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
       console.log('🔍 Has report data in metadata?', !!data.metadata?.report);
       console.log('🔍 Full response data keys:', Object.keys(data));
       
-      // Report is nested inside metadata.report, not at top level
+      // Handle different response types
       if (data.response_type === 'report' && data.metadata?.report) {
         console.log('📊 Report response detected, extracting summary...');
         console.log('📊 Report data:', JSON.stringify(data.metadata.report, null, 2));
         console.log('📊 Metadata data:', JSON.stringify(data.metadata, null, 2));
         // Don't await - let it run in background
         extractSummaryFromReport(data).catch(err => {
-          console.error('❌ Error extracting summary from report:', err);
+          console.warn('❌ Error extracting summary from report:', err);
         });
+      } else if (data.response_type === 'text' && data.metadata) {
+        console.log('💬 Text response detected');
+        console.log('📋 Metadata:', JSON.stringify(data.metadata, null, 2));
+        
+        // Handle collected_info - save to Firestore chat document if present
+        if (data.metadata.collected_info && Object.keys(data.metadata.collected_info).length > 0) {
+          console.log('📝 Collected info:', JSON.stringify(data.metadata.collected_info, null, 2));
+          // Save collected_info to Firestore (backend also does this, but we can update it here too)
+          try {
+            const chatRef = doc(db, 'chats', chatId);
+            await updateDoc(chatRef, {
+              user_metadata: data.metadata.collected_info,
+              updatedAt: serverTimestamp()
+            });
+            console.log('✅ Saved collected_info to Firestore');
+          } catch (err) {
+            console.warn('⚠️ Could not save collected_info to Firestore:', err);
+          }
+        }
+        
+        // Check if information is complete - if so, trigger summary generation
+        if (data.metadata.information_complete) {
+          console.log('✅ Information complete - summary will be generated when message arrives from Firestore');
+          // Summary generation will be triggered automatically by the messages.length useEffect
+          // when the new bot message arrives from Firestore via onSnapshot
+          // This ensures we have the complete conversation history
+        }
+        
+        // Log image request flag if present
+        if (data.metadata.should_request_image || data.metadata.ready_for_images) {
+          console.log('📸 Image request flag detected:', {
+            should_request_image: data.metadata.should_request_image,
+            ready_for_images: data.metadata.ready_for_images
+          });
+          // The UI already has image upload functionality, so no additional action needed
+        }
       } else {
-        console.log('⚠️ Not a report response or missing report data');
+        console.log('⚠️ Not a report or text response, or missing data');
         console.log('   response_type:', data.response_type);
         console.log('   has report (top level):', !!data.report);
         console.log('   has report (in metadata):', !!data.metadata?.report);
@@ -492,8 +545,12 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
         console.warn('⚠️ Unknown response format, returning full data:', data);
         return JSON.stringify(data) || "Sorry, something went wrong.";
       }
-    } catch (error) {
-      console.error("API error:", error);
+    } catch (error: any) {
+      console.warn("API error:", error);
+      
+      // Clear refs on error
+      abortControllerRef.current = null;
+      
       return "Sorry, something went wrong.";
     }
   }
@@ -531,14 +588,20 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
       await getGeminiResponse(userMessageText);
       // Backend handles saving both user and bot messages to Firestore
       // Frontend just listens via onSnapshot to update UI
-    } catch (error) {
-      console.error('Error sending message:', error);
+    } catch (error: any) {
+      console.warn('Error sending message:', error);
       // Remove optimistic message on error
       setMessages(prev => prev.filter(msg => msg.id !== tempId));
       // Restore input
       setInput(userMessageText);
-      // Optionally show error to user
-      Alert.alert('Error', 'Failed to send message. Please try again.');
+      // Don't show alert for network errors (they're logged to console)
+      const isNetworkError = error?.message?.includes('Network request failed') || 
+                            error?.message?.includes('NetworkError') ||
+                            error?.message?.includes('Failed to fetch') ||
+                            error?.name === 'TypeError' && error?.message?.includes('Network');
+      if (!isNetworkError) {
+        console.warn('Failed to send message. Please try again.');
+      }
     }
   };
 
@@ -560,7 +623,7 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
     await uploadBytes(storageRef, blob);
     return await getDownloadURL(storageRef);
     } catch (error) {
-      console.error('Error uploading image:', error);
+      console.warn('Error uploading image:', error);
       throw error;
     }
   };
@@ -680,9 +743,16 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
         throw error;
       }
   
-    } catch (error) {
-      console.error("Image upload or analysis failed:", error);
-      Alert.alert('Error', 'Failed to upload image. Please try again.');
+    } catch (error: any) {
+      console.warn("Image upload or analysis failed:", error);
+      // Don't show alert for network errors (they're logged to console)
+      const isNetworkError = error?.message?.includes('Network request failed') || 
+                            error?.message?.includes('NetworkError') ||
+                            error?.message?.includes('Failed to fetch') ||
+                            error?.name === 'TypeError' && error?.message?.includes('Network');
+      if (!isNetworkError) {
+        Alert.alert('Error', 'Failed to upload image. Please try again.');
+      }
     }
   };
 
@@ -804,7 +874,7 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
       setNewTitle('');
       Alert.alert("Success", "Chat title has been updated.");
     } catch (error) {
-      console.error("Failed to rename chat:", error);
+      console.warn("Failed to rename chat:", error);
     }
   };
 
@@ -920,7 +990,7 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
       
       return extractedSummary;
     } catch (error) {
-      console.error('❌ Error extracting summary from report:', error);
+      console.warn('❌ Error extracting summary from report:', error);
       return null;
     }
   };
@@ -1051,7 +1121,7 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
       
       return parsed;
     } catch (err) {
-      console.error("❌ Summary generation error:", err);
+      console.warn("❌ Summary generation error:", err);
       return {
         diagnosis: "Not enough information",
         symptoms: ["Not enough information"],
@@ -1133,7 +1203,7 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
                             }}
                           />
                           {!revealedImages.has(item.id) && (
-                            <BlurView intensity={15} tint="light" style={styles.imageBlurOverlay}>
+                            <BlurView intensity={10} tint="light" style={styles.imageBlurOverlay}>
                               <TouchableOpacity 
                                 style={styles.showImageButton}
                                 onPress={() => {
