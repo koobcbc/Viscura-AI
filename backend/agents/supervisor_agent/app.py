@@ -352,10 +352,16 @@ async def _route_image_then_report(req: SupervisorRequest) -> AgentResponse:
     
     # Extract diagnosis from prediction_result
     # prediction_result has: {"confidence": float, "predicted_class": str}
-    diagnosis = {
-        "diagnosis_name": prediction_result.get("prediction", "Unknown"),
-        "confidence": prediction_result.get("confidence", 0.0),
-    }
+    if req.speciality == "skin":
+        diagnosis = {
+            "diagnosis_name": prediction_result.get("predicted_class", "Unknown"),
+            "confidence": prediction_result.get("confidence", 0.0),
+        }
+    else:
+        diagnosis = {
+            "diagnosis_name": prediction_result.get("prediction", "Unknown"),
+            "confidence": prediction_result.get("confidence", 0.0),
+        }
 
     db.log_vision_result(req.chat_id, {
         "speciality": req.speciality,
