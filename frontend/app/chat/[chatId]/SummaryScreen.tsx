@@ -87,7 +87,7 @@ export default function SummaryScreen({ summary }: { summary: Summary }) {
       </View>
 
       <View style={styles.row}>
-        <Text style={styles.heading}>Treatment Options</Text>
+        <Text style={styles.heading}>Key Takeaways</Text>
         {renderList(summary.treatments)}
       </View>
     </ScrollView>

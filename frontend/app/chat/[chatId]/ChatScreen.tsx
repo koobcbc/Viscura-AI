@@ -72,6 +72,7 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [isTitleManuallyChanged, setIsTitleManuallyChanged] = useState(false);
   const [revealedImages, setRevealedImages] = useState<Set<string>>(new Set());
+  const [imageAspectRatios, setImageAspectRatios] = useState<Map<string, number>>(new Map());
   const abortControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -112,6 +113,32 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
           sender,
           image,
         } as Message;
+      });
+      
+      // Pre-fetch image dimensions for any new images
+      msgs.forEach(msg => {
+        if (msg.image && !imageAspectRatios.has(msg.id)) {
+          Image.getSize(
+            msg.image,
+            (width, height) => {
+              const aspectRatio = width / height;
+              setImageAspectRatios(prev => {
+                const newMap = new Map(prev);
+                newMap.set(msg.id, aspectRatio);
+                return newMap;
+              });
+            },
+            (error) => {
+              console.warn('Failed to get image size:', error);
+              // Use default aspect ratio of 1 (square) if we can't get dimensions
+              setImageAspectRatios(prev => {
+                const newMap = new Map(prev);
+                newMap.set(msg.id, 1);
+                return newMap;
+              });
+            }
+          );
+        }
       });
       // Remove any temporary optimistic messages when real messages arrive from Firestore
       setMessages(prev => {
@@ -669,7 +696,7 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
 
     const result = await ImagePicker.launchCameraAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
+      allowsEditing: false, // Disable editing to avoid iOS crop misalignment bug
       quality: 0.6,
     });
 
@@ -681,7 +708,7 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
   const launchImageLibrary = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
+      allowsEditing: false, // Disable editing to avoid iOS crop misalignment bug
       quality: 0.6,
     });
   
@@ -697,6 +724,26 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
       const imageUrl = await uploadImageAsync(localUri, chatId);
       setImages(prev => [...prev, imageUrl]);
   
+      // Get image dimensions before creating optimistic message
+      let aspectRatio = 1; // Default to square
+      try {
+        await new Promise<void>((resolve, reject) => {
+          Image.getSize(
+            imageUrl,
+            (width, height) => {
+              aspectRatio = width / height;
+              resolve();
+            },
+            (error) => {
+              console.warn('Failed to get image size:', error);
+              resolve(); // Continue with default aspect ratio
+            }
+          );
+        });
+      } catch (error) {
+        console.warn('Error getting image size:', error);
+      }
+      
       // Optimistic UI update: Add user message with image immediately to local state
       const tempId = `temp-image-${Date.now()}`;
       const optimisticUserMessage: Message = {
@@ -708,6 +755,9 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
         image: imageUrl,
         createdAt: Timestamp.now(),
       };
+      
+      // Set aspect ratio for this image
+      setImageAspectRatios(prev => new Map(prev).set(tempId, aspectRatio));
       
       // Add optimistic message immediately
       setMessages(prev => [...prev, optimisticUserMessage]);
@@ -932,7 +982,7 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
       // Extract treatments (from report output, home_remedy_details, or recommendations)
       let treatments: string[] = [];
       const treatmentSources = [
-        report.home_remedy_details,
+        // report.home_remedy_details,
         report.output,
         ...(Array.isArray(report.recommendations) ? report.recommendations : [])
       ].filter(Boolean);
@@ -1192,30 +1242,55 @@ export default function ChatScreen({ chatId }: { chatId: string }) {
                       )}
                       {item.image && (
                         <View style={styles.imageContainer}>
-                          <Image 
-                            source={{ uri: item.image }} 
-                            style={styles.imagePreview}
-                            onLoad={() => {
-                              // Scroll to bottom after image loads
-                              setTimeout(() => {
-                                flatListRef.current?.scrollToEnd({ animated: true });
-                              }, 100);
-                            }}
-                          />
-                          {!revealedImages.has(item.id) && (
-                            <BlurView intensity={10} tint="light" style={styles.imageBlurOverlay}>
-                              <TouchableOpacity 
-                                style={styles.showImageButton}
-                                onPress={() => {
-                                  setRevealedImages(prev => new Set(prev).add(item.id));
-                                }}
-                                activeOpacity={0.7}
-                              >
-                                <Ionicons name="eye" size={20} color="#000" />
-                                <Text style={styles.showImageButtonText}>Show Image</Text>
-                              </TouchableOpacity>
-                            </BlurView>
-                          )}
+                          <View style={[
+                            styles.imageWrapper,
+                            {
+                              aspectRatio: imageAspectRatios.has(item.id) 
+                                ? imageAspectRatios.get(item.id) 
+                                : 1 // Default to square (1:1) before image loads
+                            }
+                          ]}>
+                            <Image 
+                              source={{ uri: item.image }} 
+                              style={styles.imagePreview}
+                              resizeMode="contain"
+                              onLoad={() => {
+                                // Get image dimensions and calculate aspect ratio
+                                if (!imageAspectRatios.has(item.id)) {
+                                  Image.getSize(
+                                    item.image,
+                                    (width, height) => {
+                                      const aspectRatio = width / height;
+                                      setImageAspectRatios(prev => new Map(prev).set(item.id, aspectRatio));
+                                    },
+                                    (error) => {
+                                      console.warn('Failed to get image size:', error);
+                                      // Use default aspect ratio of 1 (square) if we can't get dimensions
+                                      setImageAspectRatios(prev => new Map(prev).set(item.id, 1));
+                                    }
+                                  );
+                                }
+                                // Scroll to bottom after image loads
+                                setTimeout(() => {
+                                  flatListRef.current?.scrollToEnd({ animated: true });
+                                }, 100);
+                              }}
+                            />
+                            {!revealedImages.has(item.id) && (
+                              <BlurView intensity={10} tint="light" style={styles.imageBlurOverlay}>
+                                <TouchableOpacity 
+                                  style={styles.showImageButton}
+                                  onPress={() => {
+                                    setRevealedImages(prev => new Set(prev).add(item.id));
+                                  }}
+                                  activeOpacity={0.7}
+                                >
+                                  <Ionicons name="eye" size={20} color="#000" />
+                                  <Text style={styles.showImageButtonText}>Show Image</Text>
+                                </TouchableOpacity>
+                              </BlurView>
+                            )}
+                          </View>
                         </View>
                       )}
                       {item.text && item.text.trim() && (
@@ -1421,9 +1496,16 @@ const styles = StyleSheet.create({
     marginTop: 6,
     marginBottom: 4,
   },
-  imagePreview: {
+  imageWrapper: {
+    position: 'relative',
     width: 200,
-    height: 200,
+    maxHeight: 400,
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  imagePreview: {
+    width: '100%',
+    height: '100%',
     borderRadius: 12,
   },
   imageBlurOverlay: {
